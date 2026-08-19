@@ -3,6 +3,7 @@ import { ChatView } from "@/components/study/ChatView";
 import { GenerateForm } from "@/components/study/GenerateForm";
 import { GeneratedContent } from "@/components/study/GeneratedContent";
 import { NotesList } from "@/components/study/NotesList";
+import { OfflineBanner } from "@/components/study/OfflineBanner";
 import { RabbitLogo } from "@/components/study/RabbitLogo";
 import { SettingsModal } from "@/components/study/SettingsModal";
 import { Button } from "@/components/ui/button";
@@ -426,8 +427,10 @@ export default function Dashboard() {
         </aside>
 
         {/* Main */}
-        <main className="min-w-0 flex-1">
-          <div className="mb-4 hidden items-center justify-between lg:flex">
+        <main className="min-w-0 flex-1 space-y-4">
+          <OfflineBanner onOpenSettings={() => setSettingsOpen(true)} />
+
+          <div className="hidden items-center justify-between lg:flex">
             <div>
               <h1 className="text-xl font-bold tracking-tight text-foreground">
                 {activeView === "chat" ? "AI Chat" : "Study Notes"}

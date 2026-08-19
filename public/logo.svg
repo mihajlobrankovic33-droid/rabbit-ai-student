@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <!-- Background Rounded Card -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  
+  <!-- Rabbit Ears -->
+  <path d="M 180 120 C 160 50, 190 20, 215 35 C 240 50, 230 140, 220 180 Z" fill="#ffffff" filter="url(#shadow)"/>
+  <path d="M 190 125 C 180 75, 198 55, 210 65 C 222 75, 215 135, 210 165 Z" fill="#f472b6" opacity="0.85"/>
+  
+  <path d="M 332 120 C 352 50, 322 20, 297 35 C 272 50, 282 140, 292 180 Z" fill="#ffffff" filter="url(#shadow)"/>
+  <path d="M 322 125 C 332 75, 314 55, 302 65 C 290 75, 297 135, 302 165 Z" fill="#f472b6" opacity="0.85"/>
+  
+  <!-- Rabbit Head -->
+  <ellipse cx="256" cy="270" rx="140" ry="125" fill="#ffffff" filter="url(#shadow)"/>
+  
+  <!-- Graduation Cap -->
+  <polygon points="256,150 160,195 256,235 352,195" fill="#1e1b4b"/>
+  <rect x="210" y="215" width="92" height="35" rx="6" fill="#312e81"/>
+  <!-- Tassel -->
+  <line x1="256" y1="195" x2="330" y2="230" stroke="#f59e0b" stroke-width="4"/>
+  <circle cx="330" cy="235" r="7" fill="#f59e0b"/>
+
+  <!-- Eyes -->
+  <ellipse cx="205" cy="280" rx="14" ry="18" fill="#1e1b4b"/>
+  <circle cx="201" cy="274" r="5" fill="#ffffff"/>
+  
+  <ellipse cx="307" cy="280" rx="14" ry="18" fill="#1e1b4b"/>
+  <circle cx="303" cy="274" r="5" fill="#ffffff"/>
+  
+  <!-- Cute Cheeks -->
+  <ellipse cx="170" cy="305" rx="16" ry="10" fill="#fbcfe8" opacity="0.9"/>
+  <ellipse cx="342" cy="305" rx="16" ry="10" fill="#fbcfe8" opacity="0.9"/>
+  
+  <!-- Nose & Mouth -->
+  <path d="M 248 305 L 264 305 L 256 316 Z" fill="#ec4899"/>
+  <path d="M 256 316 Q 244 330 236 322" stroke="#4b5563" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M 256 316 Q 268 330 276 322" stroke="#4b5563" stroke-width="4" fill="none" stroke-linecap="round"/>
+  
+  <!-- Open Book at Bottom -->
+  <path d="M 170 410 Q 256 390 256 425 Q 256 390 342 410 L 342 455 Q 256 435 256 470 Q 256 435 170 455 Z" fill="#f8fafc" stroke="#6366f1" stroke-width="4"/>
+  <line x1="256" y1="425" x2="256" y2="470" stroke="#6366f1" stroke-width="4"/>
+</svg>

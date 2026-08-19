@@ -1,8 +1,38 @@
 import type { ChatMessage, StudyContent } from "@/types/study";
+import {
+  generateOllamaChat,
+  generateOllamaNotes,
+  getOllamaConfig,
+} from "./ollamaService";
+
+export type AIProvider = "ollama" | "builtin_offline" | "gemini";
+
+const AI_PROVIDER_KEY = "study_buddy_ai_provider";
+const GEMINI_KEY_STORAGE = "study_buddy_gemini_key";
+
+export function getSelectedAIProvider(): AIProvider {
+  try {
+    const raw = localStorage.getItem(AI_PROVIDER_KEY);
+    if (raw === "ollama" || raw === "builtin_offline" || raw === "gemini") {
+      return raw;
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+  return "builtin_offline";
+}
+
+export function setSelectedAIProvider(provider: AIProvider): void {
+  try {
+    localStorage.setItem(AI_PROVIDER_KEY, provider);
+  } catch (e) {
+    console.error(e);
+  }
+}
 
 /**
  * Built-in offline "Study Buddy" brain and AI generator.
- * Works seamlessly in 15+ languages offline, and supports Gemini when configured.
+ * Works seamlessly in 15+ languages offline, and supports Ollama & Gemini when configured.
  */
 
 const SCRIPT_LANGUAGES: Array<[RegExp, string]> = [
@@ -143,51 +173,88 @@ const I18N: Record<string, Messages> = {
 export async function generateChatResponse(
   message: string,
   history: ChatMessage[] = [],
-  apiKey?: string,
+  customApiKey?: string,
 ): Promise<string> {
   const clean = message.trim();
   const lower = clean.toLowerCase();
   const lang = detectLanguage(clean);
   const msgs = I18N[lang] || I18N.en;
 
-  // If Gemini API key is provided or stored
-  const key = apiKey || (typeof process !== "undefined" ? process.env?.VITE_GEMINI_API_KEY : undefined);
-  if (key) {
-    try {
-      const contents = [
-        ...history.slice(-6).map((msg) => ({
-          role: msg.role === "assistant" ? "model" : "user",
-          parts: [{ text: msg.content }],
-        })),
-        {
-          role: "user",
-          parts: [
-            {
-              text: `You are Study Buddy, an encouraging, friendly, and expert AI tutor. Explain clearly, use formatting (bullet points, bold text), and tailor explanations to the student. Respond in the same language as the student's question.\n\nStudent question: ${clean}`,
-            },
-          ],
-        },
-      ];
+  const provider = getSelectedAIProvider();
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents }),
-        },
-      );
-      if (response.ok) {
-        const data = await response.json();
-        const candidate = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (candidate) return candidate;
-      }
-    } catch (e) {
-      console.warn("Cloud AI call failed, falling back to offline assistant:", e);
+  // 1. Ollama Provider (Free local AI with lightest models like Qwen 0.5B, SmolLM 135M, Llama 3.2 1B)
+  if (provider === "ollama") {
+    try {
+      const ollamaConfig = getOllamaConfig();
+      const messagesForOllama = [
+        ...history.slice(-6).map((m) => ({
+          role: m.role === "assistant" ? "assistant" : "user",
+          content: m.content,
+        })),
+        { role: "user", content: clean },
+      ];
+      const ollamaReply = await generateOllamaChat(messagesForOllama, ollamaConfig);
+      return ollamaReply;
+    } catch (ollamaErr: unknown) {
+      console.warn("Ollama query failed, falling back to built-in offline engine:", ollamaErr);
+      const errMsg = ollamaErr instanceof Error ? ollamaErr.message : "Ollama connection error";
+      const fallbackResponse = generateBuiltinOfflineChat(clean, lower, msgs);
+      return `*(Note: Ollama is currently unreachable: ${errMsg}. Using built-in offline Study Buddy instead)*\n\n${fallbackResponse}`;
     }
   }
 
-  // Offline intelligent study responses
+  // 2. Gemini Cloud Provider (Optional)
+  if (provider === "gemini") {
+    const key =
+      customApiKey ||
+      localStorage.getItem(GEMINI_KEY_STORAGE) ||
+      (typeof process !== "undefined" ? process.env?.VITE_GEMINI_API_KEY : undefined);
+
+    if (key) {
+      try {
+        const contents = [
+          ...history.slice(-6).map((msg) => ({
+            role: msg.role === "assistant" ? "model" : "user",
+            parts: [{ text: msg.content }],
+          })),
+          {
+            role: "user",
+            parts: [
+              {
+                text: `You are Study Buddy, an encouraging, friendly, and expert AI tutor. Explain clearly, use formatting (bullet points, bold text), and tailor explanations to the student. Respond in the same language as the student's question.\n\nStudent question: ${clean}`,
+              },
+            ],
+          },
+        ];
+
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contents }),
+          },
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const candidate = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (candidate) return candidate;
+        }
+      } catch (e) {
+        console.warn("Cloud AI call failed, falling back to built-in offline assistant:", e);
+      }
+    }
+  }
+
+  // 3. Built-in Offline AI Engine (Instant 0MB download, runs on every student device without internet)
+  return generateBuiltinOfflineChat(clean, lower, msgs);
+}
+
+function generateBuiltinOfflineChat(
+  clean: string,
+  lower: string,
+  msgs: Messages
+): string {
   if (/^(hi|hello|hey|hola|bonjour|hallo|ciao|olá|привет|здрав)/i.test(lower)) {
     return msgs.greeting;
   }
@@ -216,62 +283,84 @@ export async function generateChatResponse(
 export async function generateStudyNotes(
   title: string,
   topic: string,
-  apiKey?: string,
+  customApiKey?: string,
 ): Promise<{ content: StudyContent }> {
   const displayTitle = title.trim() || topic.trim() || "Study Notes";
   const displayTopic = topic.trim() || title.trim() || "General Study Topic";
 
-  const key = apiKey || (typeof process !== "undefined" ? process.env?.VITE_GEMINI_API_KEY : undefined);
-  if (key) {
+  const provider = getSelectedAIProvider();
+
+  // 1. Ollama Provider
+  if (provider === "ollama") {
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-                parts: [
-                  {
-                    text: `Generate comprehensive, clear study notes for:\nTitle: ${displayTitle}\nTopic/Details: ${displayTopic}\n\nReturn JSON with keys: "title" (string), "keyPoints" (array of 4-6 concise bullet strings), "summary" (string of 2-4 sentences), and "fullNotes" (markdown string explaining the topic thoroughly with sections).`,
-                  },
-                ],
-              },
-            ],
-            generationConfig: {
-              responseMimeType: "application/json",
-            },
-          }),
-        },
-      );
-      if (response.ok) {
-        const data = await response.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) {
-          const parsed = JSON.parse(text);
-          return {
-            content: {
-              title: parsed.title || displayTitle,
-              keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints : [
-                `Overview of ${displayTopic}`,
-                "Key mechanisms and functional properties",
-                "Primary use cases and practical applications",
-                "Review questions and active recall prompts",
-              ],
-              summary: parsed.summary || `Comprehensive overview and revision notes for ${displayTitle}.`,
-              fullNotes: parsed.fullNotes || "",
-            },
-          };
-        }
-      }
-    } catch (e) {
-      console.warn("Cloud notes generation failed, using built-in generator:", e);
+      const ollamaConfig = getOllamaConfig();
+      const result = await generateOllamaNotes(displayTitle, displayTopic, ollamaConfig);
+      return { content: result };
+    } catch (ollamaErr) {
+      console.warn("Ollama notes generation failed, falling back to built-in generator:", ollamaErr);
     }
   }
 
-  // Built-in structured notes generator
+  // 2. Gemini Cloud Provider
+  if (provider === "gemini") {
+    const key =
+      customApiKey ||
+      localStorage.getItem(GEMINI_KEY_STORAGE) ||
+      (typeof process !== "undefined" ? process.env?.VITE_GEMINI_API_KEY : undefined);
+
+    if (key) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    {
+                      text: `Generate comprehensive, clear study notes for:\nTitle: ${displayTitle}\nTopic/Details: ${displayTopic}\n\nReturn JSON with keys: "title" (string), "keyPoints" (array of 4-6 concise bullet strings), "summary" (string of 2-4 sentences), and "fullNotes" (markdown string explaining the topic thoroughly with sections).`,
+                    },
+                  ],
+                },
+              ],
+              generationConfig: {
+                responseMimeType: "application/json",
+              },
+            }),
+          },
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            const parsed = JSON.parse(text);
+            return {
+              content: {
+                title: parsed.title || displayTitle,
+                keyPoints: Array.isArray(parsed.keyPoints)
+                  ? parsed.keyPoints
+                  : [
+                      `Overview of ${displayTopic}`,
+                      "Key mechanisms and functional properties",
+                      "Primary use cases and practical applications",
+                      "Review questions and active recall prompts",
+                    ],
+                summary: parsed.summary || `Comprehensive overview and revision notes for ${displayTitle}.`,
+                fullNotes: parsed.fullNotes || "",
+              },
+            };
+          }
+        }
+      } catch (e) {
+        console.warn("Cloud notes generation failed, using built-in generator:", e);
+      }
+    }
+  }
+
+  // 3. Built-in structured notes generator (Offline)
   return {
     content: {
       title: displayTitle,

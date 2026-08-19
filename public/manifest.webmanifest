@@ -1,0 +1,17 @@
+{
+  "name": "Study Buddy — AI Study Assistant",
+  "short_name": "Study Buddy",
+  "description": "Your friendly offline-ready AI study assistant with free lightweight Ollama & built-in AI models.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

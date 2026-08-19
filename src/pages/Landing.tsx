@@ -4,7 +4,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
-  BookOpenCheck,
+  Cpu,
+  Download,
   Library,
   MessageSquareText,
   Sparkles,
@@ -22,28 +23,28 @@ const fadeUp = {
 
 const FEATURES = [
   {
-    icon: MessageSquareText,
-    title: "AI Chat that explains",
+    icon: Cpu,
+    title: "Free Lightest Ollama AI",
     description:
-      "Ask anything about any subject. Study Buddy breaks down tough concepts into simple, friendly explanations — one step at a time.",
+      "Connect locally to ultra-compact models like Qwen 2.5 (0.5B) and SmolLM (135M). Free, super fast, and runs without internet on any student laptop.",
+  },
+  {
+    icon: Download,
+    title: "100% Offline with Service Worker",
+    description:
+      "One click downloads the entire application shell, study tools, and AI brain directly to your device. Study on planes, subways, or anywhere without WiFi.",
   },
   {
     icon: Wand2,
-    title: "Instant study notes",
+    title: "Instant Structured Study Notes",
     description:
-      "Turn any topic into clean, structured notes with key points and a summary you can actually revise from.",
+      "Turn any topic into clean, exam-ready notes with key takeaways, mechanisms, active recall prompts, and quick summaries.",
   },
   {
     icon: Library,
-    title: "Your library, saved",
+    title: "Private Local Library",
     description:
-      "Save notes and chat sessions and revisit them anytime. Everything persists right in your browser.",
-  },
-  {
-    icon: BookOpenCheck,
-    title: "Works everywhere",
-    description:
-      "No installs, no setup. A built-in study brain always responds, with cloud AI when it's available.",
+      "Save notes and chat conversations securely in your browser. Complete privacy with zero external tracking required.",
   },
 ];
 
