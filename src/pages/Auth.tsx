@@ -25,8 +25,9 @@ import {
   Loader2,
   Lock,
   Mail,
-  UserX,
+  Moon,
   User,
+  UserX,
 } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
@@ -45,7 +46,6 @@ function resolveRedirectAfterAuth(
   return fallback;
 }
 
-/** The official multicolor Google "G" mark. */
 function GoogleIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 48 48" aria-hidden>
@@ -69,66 +69,22 @@ function GoogleIcon({ className }: { className?: string }) {
   );
 }
 
-/** Map Convex Auth error codes/substrings to friendly, actionable messages. */
 function friendlyAuthError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
   const lower = raw.toLowerCase();
   if (
     lower.includes("missing environment variable") ||
     lower.includes("client_id") ||
-    lower.includes("client id") ||
     lower.includes("missing an `issuer`")
   ) {
-    return "Google sign-in isn't configured yet — add the AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET keys in the project's Keys tab, then try again.";
+    return "Google sign-in is not configured yet. Please continue with Guest mode or email!";
   }
   if (
     lower.includes("invalid credential") ||
     lower.includes("invalid_email_or_password") ||
     lower.includes("no password")
   ) {
-    return "That email and password didn't match. If you created your account with an email code or as a guest, use that method to get in — or sign up with a password instead.";
-  }
-  if (
-    lower.includes("too many failed") ||
-    lower.includes("rate limit") ||
-    lower.includes("rate_limit") ||
-    lower.includes("too many attempts")
-  ) {
-    return "Too many failed attempts — please wait a few minutes and try again.";
-  }
-  if (
-    lower.includes("already exists") ||
-    lower.includes("email_already_exists") ||
-    lower.includes("already registered")
-  ) {
-    return "An account with this email already exists — try logging in instead.";
-  }
-  if (lower.includes("invalid password") || lower.includes("invalid_password")) {
-    return "That password doesn't match this account. Please try again.";
-  }
-  if (
-    lower.includes("user not found") ||
-    lower.includes("user_not_found") ||
-    lower.includes("no user")
-  ) {
-    return "No account found with this email — sign up to create one.";
-  }
-  if (
-    lower.includes("too short") ||
-    lower.includes("password_too_short") ||
-    lower.includes("at least 8")
-  ) {
-    return "Password must be at least 8 characters long.";
-  }
-  if (
-    lower.includes("invalid email") ||
-    lower.includes("invalid_email") ||
-    lower.includes("not a valid email")
-  ) {
-    return "Please enter a valid email address.";
-  }
-  if (lower.includes("verification code") || lower.includes("incorrect")) {
-    return "The verification code you entered is incorrect.";
+    return "Incorrect email or password. You can also sign in as Guest instantly!";
   }
   return raw;
 }
@@ -167,11 +123,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      // The ConvexAuth client redirects the browser to Google automatically;
-      // on return it completes the sign-in via the ?code= URL param. Send an
-      // absolute redirectTo (this app's own origin + path) so the server sends
-      // the browser back HERE after Google login instead of to the backend URL
-      // (which has no page and shows "No matching routes found").
       const absoluteRedirect = new URL(
         redirect.startsWith("/") ? redirect : "/",
         window.location.origin,
@@ -210,8 +161,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           flow: "signIn",
         });
       }
-      // Successful password sign-in is immediate; the redirect effect handles
-      // navigation once the session is confirmed.
     } catch (err) {
       console.error("Password sign-in error:", err);
       setError(friendlyAuthError(err));
@@ -239,7 +188,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(redirect);
     } catch (err) {
       console.error("OTP verification error:", err);
-      setError("The verification code you entered is incorrect.");
+      setError("The verification code entered is incorrect.");
       setIsLoading(false);
       setOtp("");
     }
@@ -253,7 +202,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(redirect);
     } catch (err) {
       console.error("Guest login error:", err);
-      setError(`Failed to sign in as guest: ${friendlyAuthError(err)}`);
+      setError(`Guest sign-in notice: ${friendlyAuthError(err)}`);
       setIsLoading(false);
     }
   };
@@ -263,13 +212,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-background">
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute left-1/2 top-[-180px] h-[420px] w-[720px] -translate-x-1/2 rounded-full bg-primary/[0.08] blur-3xl" />
-        <div className="absolute bottom-[-140px] right-[-120px] h-[320px] w-[320px] rounded-full bg-accent/40 blur-3xl" />
+      {/* Decorative Blur Backgrounds */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="absolute left-1/2 top-[-180px] h-[480px] w-[800px] -translate-x-1/2 rounded-full bg-gradient-to-b from-primary/15 via-primary/5 to-transparent blur-3xl" />
+        <div className="absolute bottom-[-140px] right-[-120px] h-[360px] w-[360px] rounded-full bg-accent/30 blur-3xl" />
       </div>
 
       <div className="flex flex-1 items-center justify-center px-4 py-10">
-        <Card className="w-full max-w-md rounded-2xl border-border/70">
+        <Card className="w-full max-w-md rounded-3xl border-border/80 bg-card/90 shadow-2xl shadow-primary/10 backdrop-blur-md">
           {showOtpView ? (
             <>
               <CardHeader className="mt-4 text-center">
@@ -278,8 +228,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 </CardTitle>
                 <CardDescription>
                   {otpEmail
-                    ? `We've sent a code to ${otpEmail}`
-                    : "Enter your email and we'll send you a code"}
+                    ? `We've sent a 6-digit code to ${otpEmail}`
+                    : "Enter your email to receive a login code"}
                 </CardDescription>
               </CardHeader>
               <form onSubmit={handleOtpSubmit}>
@@ -297,7 +247,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         type="email"
                         placeholder="name@example.com"
                         autoComplete="email"
-                        className="pl-9"
+                        className="pl-9 rounded-xl"
                         disabled={isLoading}
                         onChange={(e) => setEmail(e.target.value)}
                         required
@@ -325,16 +275,16 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     </InputOTP>
                   </div>
                   {error && (
-                    <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-center text-sm text-destructive">
+                    <p className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-center text-xs font-semibold text-destructive">
                       {error}
                     </p>
                   )}
-                  <p className="text-center text-sm text-muted-foreground">
+                  <p className="text-center text-xs text-muted-foreground">
                     Didn&apos;t receive a code?{" "}
                     <Button
                       type="button"
                       variant="link"
-                      className="h-auto p-0"
+                      className="h-auto p-0 text-xs font-bold"
                       onClick={() => {
                         setOtp("");
                         if (otpEmail) {
@@ -356,7 +306,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 <CardFooter className="flex-col gap-2">
                   <Button
                     type="submit"
-                    className="w-full"
+                    className="w-full rounded-xl font-bold"
                     disabled={isLoading || otp.length !== 6}
                   >
                     {isLoading ? (
@@ -376,39 +326,43 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     variant="ghost"
                     onClick={() => setStep("login")}
                     disabled={isLoading}
-                    className="w-full"
+                    className="w-full text-xs"
                   >
-                    Back to password sign-in
+                    Back to sign in
                   </Button>
                 </CardFooter>
               </form>
             </>
           ) : (
             <>
-              <CardHeader className="text-center">
+              <CardHeader className="text-center pb-2">
                 <div className="mb-3 flex justify-center">
                   <Link to="/" className="cursor-pointer">
-                    <RabbitLogo className="h-16 w-16 rounded-3xl" />
+                    <RabbitLogo size="lg" />
                   </Link>
                 </div>
-                <CardTitle className="text-xl font-bold tracking-tight">
+                <div className="inline-flex items-center justify-center gap-1.5 mx-auto rounded-full bg-primary/10 px-3 py-1 text-[11px] font-bold text-primary mb-2">
+                  <Moon className="h-3 w-3" />
+                  <span>Study smarter with a buddy who never sleeps</span>
+                </div>
+                <CardTitle className="text-2xl font-extrabold tracking-tight">
                   {mode === "login" ? "Welcome back" : "Create your account"}
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-xs">
                   {mode === "login"
-                    ? "Log in to keep studying with Study Buddy"
-                    : "Sign up free — your notes and chats will be waiting"}
+                    ? "Log in to access your notes, chats, and 24/7 offline study tools"
+                    : "Sign up free — your revision library will be saved instantly"}
                 </CardDescription>
               </CardHeader>
 
-              {/* Login / Sign up switch */}
-              <div className="mx-6 mb-4 grid grid-cols-2 gap-1 rounded-xl bg-muted p-1">
+              {/* Login / Sign up Switcher */}
+              <div className="mx-6 mb-4 grid grid-cols-2 gap-1 rounded-2xl bg-muted/60 p-1">
                 {(["login", "signup"] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
                     onClick={() => switchMode(m)}
-                    className={`cursor-pointer rounded-lg px-3 py-2 text-sm font-medium transition-all ${
+                    className={`cursor-pointer rounded-xl px-3 py-2 text-xs font-bold transition-all ${
                       mode === m
                         ? "bg-card text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
@@ -426,19 +380,19 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     variant="outline"
                     onClick={() => void handleGoogleLogin()}
                     disabled={isLoading}
-                    className="h-11 w-full gap-2.5 border-border/70 bg-card text-foreground transition-all hover:border-primary/40 hover:bg-muted/40"
+                    className="h-11 w-full gap-2.5 rounded-xl border-border/80 bg-card font-semibold text-foreground transition-all hover:border-primary/40 hover:bg-muted/40"
                   >
-                    <GoogleIcon className="h-5 w-5" />
+                    <GoogleIcon className="h-4 w-4" />
                     Continue with Google
                   </Button>
 
                   <div className="relative py-0.5">
                     <div className="absolute inset-0 flex items-center">
-                      <span className="w-full border-t" />
+                      <span className="w-full border-t border-border/60" />
                     </div>
                     <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-card px-2 text-muted-foreground">
-                        or use email
+                      <span className="bg-card px-2 text-[10px] font-bold text-muted-foreground">
+                        or with email
                       </span>
                     </div>
                   </div>
@@ -450,39 +404,41 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         name="name"
                         placeholder="Your name (optional)"
                         autoComplete="name"
-                        className="pl-9"
+                        className="pl-9 rounded-xl"
                         disabled={isLoading}
                       />
                     </div>
                   )}
+
                   <div className="relative">
-                    <AtSign className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <AtSign className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
                     <Input
                       name="email"
                       placeholder="name@example.com"
                       type="email"
                       autoComplete="email"
-                      className="pl-9"
+                      className="pl-9 rounded-xl h-11"
                       disabled={isLoading}
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
                     />
                   </div>
+
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Lock className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
                     <Input
                       name="password"
                       placeholder={
                         mode === "signup"
-                          ? "Create a password (8+ characters)"
+                          ? "Create a password (8+ chars)"
                           : "Your password"
                       }
                       type={showPassword ? "text" : "password"}
                       autoComplete={
                         mode === "signup" ? "new-password" : "current-password"
                       }
-                      className="pl-9 pr-10"
+                      className="pl-9 pr-10 rounded-xl h-11"
                       disabled={isLoading}
                       minLength={mode === "signup" ? 8 : 1}
                       required
@@ -490,7 +446,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     <button
                       type="button"
                       onClick={() => setShowPassword((v) => !v)}
-                      className="absolute right-2.5 top-2.5 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+                      className="absolute right-3 top-3.5 rounded-md p-0.5 text-muted-foreground transition-colors hover:text-foreground"
                       aria-label={showPassword ? "Hide password" : "Show password"}
                       tabIndex={-1}
                     >
@@ -501,14 +457,16 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       )}
                     </button>
                   </div>
+
                   {error && (
-                    <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                    <p className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-center text-xs font-semibold text-destructive">
                       {error}
                     </p>
                   )}
+
                   <Button
                     type="submit"
-                    className="w-full gap-2"
+                    className="w-full h-11 rounded-xl font-bold shadow-md gap-2"
                     disabled={isLoading}
                   >
                     {isLoading ? (
@@ -519,19 +477,19 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       <ArrowRight className="h-4 w-4" />
                     )}
                     {isLoading
-                      ? "Please wait…"
+                      ? "Signing in…"
                       : mode === "login"
-                        ? "Log in"
-                        : "Create account"}
+                        ? "Sign In"
+                        : "Create Free Account"}
                   </Button>
 
                   <div className="relative py-1">
                     <div className="absolute inset-0 flex items-center">
-                      <span className="w-full border-t" />
+                      <span className="w-full border-t border-border/60" />
                     </div>
                     <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-card px-2 text-muted-foreground">
-                        Or continue with
+                      <span className="bg-card px-2 text-[10px] font-bold text-muted-foreground">
+                        Quick Shortcuts
                       </span>
                     </div>
                   </div>
@@ -542,18 +500,20 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       variant="outline"
                       onClick={handleGuestLogin}
                       disabled={isLoading}
+                      className="rounded-xl font-semibold text-xs border-border/80"
                     >
-                      <UserX className="mr-2 h-4 w-4" />
-                      Guest
+                      <UserX className="mr-2 h-4 w-4 text-primary" />
+                      Instant Guest
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => setStep("otp")}
                       disabled={isLoading}
+                      className="rounded-xl font-semibold text-xs border-border/80"
                     >
-                      <AtSign className="mr-2 h-4 w-4" />
-                      Email code
+                      <Mail className="mr-2 h-4 w-4 text-primary" />
+                      Email Code
                     </Button>
                   </div>
                 </CardContent>
@@ -561,16 +521,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             </>
           )}
 
-          <div className="rounded-b-2xl border-t bg-muted/50 px-6 py-4 text-center text-xs text-muted-foreground">
-            Secured by{" "}
-            <a
-              href="https://freebuff.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline transition-colors hover:text-primary"
-            >
-              freebuff.com
-            </a>
+          <div className="rounded-b-3xl border-t border-border/60 bg-muted/40 px-6 py-3.5 text-center text-xs text-muted-foreground">
+            Study Buddy is free & offline-capable.
           </div>
         </Card>
       </div>
