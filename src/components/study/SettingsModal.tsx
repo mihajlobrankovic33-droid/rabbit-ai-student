@@ -21,6 +21,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Key,
+  ShieldAlert,
+  RotateCcw,
 } from "lucide-react";
 import {
   AIProvider,
@@ -57,6 +59,9 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
   const [selectedModel, setSelectedModel] = useState("qwen2.5:0.5b");
   const [customModel, setCustomModel] = useState("");
+  const [repeatPenalty, setRepeatPenalty] = useState(1.3);
+  const [temperature, setTemperature] = useState(0.75);
+
   const [isTestingOllama, setIsTestingOllama] = useState(false);
   const [ollamaStatus, setOllamaStatus] = useState<{
     tested: boolean;
@@ -84,6 +89,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       const ollamaCfg = getOllamaConfig();
       setOllamaUrl(ollamaCfg.baseUrl);
       setSelectedModel(ollamaCfg.selectedModel);
+      setRepeatPenalty(ollamaCfg.repeatPenalty || 1.3);
+      setTemperature(ollamaCfg.temperature || 0.75);
       setGeminiKey(localStorage.getItem(GEMINI_KEY_STORAGE) || "");
       setIsAppCached(isAppLocallyCached());
     }
@@ -108,6 +115,12 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     } finally {
       setIsTestingOllama(false);
     }
+  };
+
+  const handleResetAntiRepetition = () => {
+    setRepeatPenalty(1.35);
+    setTemperature(0.75);
+    toast.success("Anti-loop settings reset to Strong Protection (Penalty: 1.35).");
   };
 
   const handleDownloadOfflineApp = async () => {
@@ -137,13 +150,15 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     saveOllamaConfig({
       baseUrl: ollamaUrl.trim() || "http://localhost:11434",
       selectedModel: customModel.trim() || selectedModel,
+      repeatPenalty: Number(repeatPenalty) || 1.3,
+      temperature: Number(temperature) || 0.75,
     });
     if (geminiKey.trim()) {
       localStorage.setItem(GEMINI_KEY_STORAGE, geminiKey.trim());
     } else {
       localStorage.removeItem(GEMINI_KEY_STORAGE);
     }
-    toast.success("AI and offline settings saved!");
+    toast.success("Settings saved with Anti-Repetition safeguards!");
     onOpenChange(false);
   };
 
@@ -158,7 +173,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
             <div>
               <DialogTitle className="text-lg font-bold">AI & Offline Settings</DialogTitle>
               <DialogDescription className="text-xs">
-                Configure lightweight offline AI models (Ollama, Built-in) and Service Worker offline caching.
+                Configure lightweight offline AI models (Ollama, Built-in) with anti-loop safeguards and Service Worker caching.
               </DialogDescription>
             </div>
           </div>
@@ -217,7 +232,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     </span>
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Runs lightweight models on your laptop without internet (Qwen, SmolLM, Llama).
+                    Runs lightweight models on your laptop without internet with anti-repetition protection.
                   </p>
                 </button>
 
@@ -316,6 +331,56 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     </div>
                   </div>
                 )}
+
+                {/* Anti-Repetition & Anti-Suspension Controls */}
+                <div className="rounded-xl border border-border/80 bg-background/80 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                      <ShieldAlert className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>Anti-Repetition & Anti-Loop Safeguards</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResetAntiRepetition}
+                      className="flex cursor-pointer items-center gap-1 text-[11px] text-primary hover:underline"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      <span>Reset Safeguards</span>
+                    </button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 text-xs">
+                    <div>
+                      <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+                        <span>Repetition Penalty (Breaks spam/loops):</span>
+                        <span className="font-bold text-foreground">{repeatPenalty}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1.0"
+                        max="1.8"
+                        step="0.05"
+                        value={repeatPenalty}
+                        onChange={(e) => setRepeatPenalty(parseFloat(e.target.value))}
+                        className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+                        <span>Temperature (Creativity & Variety):</span>
+                        <span className="font-bold text-foreground">{temperature}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.2"
+                        max="1.2"
+                        step="0.05"
+                        value={temperature}
+                        onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                        className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
 
                 {/* Host URL */}
                 <div>

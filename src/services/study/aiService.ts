@@ -31,158 +31,143 @@ export function setSelectedAIProvider(provider: AIProvider): void {
 }
 
 /**
- * Built-in offline "Study Buddy" brain and AI generator.
- * Works seamlessly in 15+ languages offline, and supports Ollama & Gemini when configured.
+ * Built-in intelligent offline knowledge base across disciplines.
+ * Provides dynamic, non-repetitive responses when offline.
  */
+interface SubjectPattern {
+  keywords: RegExp;
+  subject: string;
+  generateResponse: (topic: string) => string;
+}
 
-const SCRIPT_LANGUAGES: Array<[RegExp, string]> = [
-  [/[\u0600-\u06ff]/, "ar"], // Arabic
-  [/[\u0590-\u05ff]/, "he"], // Hebrew
-  [/[\u0900-\u097f]/, "hi"], // Devanagari (Hindi)
-  [/[\u0980-\u09ff]/, "bn"], // Bengali
-  [/[\u0e00-\u0e7f]/, "th"], // Thai
-  [/[\u0e80-\u0eff]/, "lo"], // Lao
-  [/[\u3040-\u30ff]/, "ja"], // Hiragana/Katakana
-  [/[\uac00-\ud7af]/, "ko"], // Hangul
-  [/[\u4e00-\u9fff\u3400-\u4dbf]/, "zh"], // CJK
-  [/[\u10a0-\u10ff]/, "ka"], // Georgian
-  [/[\u1e00-\u1eff]/, "vi"], // Vietnamese (extended Latin)
+const SUBJECT_PATTERNS: SubjectPattern[] = [
+  {
+    keywords: /(calculus|derivative|integral|limit|taylor|differentiation|chain rule|product rule)/i,
+    subject: "Calculus & Analysis",
+    generateResponse: (topic) => `### Calculus & Mathematical Analysis: **${topic}** 🧮
+
+1. **Fundamental Definition**:
+   Calculus studies instantaneous change and accumulation. For **${topic}**, determine whether the question focuses on the rate of change ($df/dx$) or total accumulated area ($\\int f(x)dx$).
+
+2. **Step-by-Step Problem Solving Method**:
+   - **Step 1**: Identify input variables and boundary conditions.
+   - **Step 2**: Apply foundational identities (power rule, product/quotient rule, or integration by substitution).
+   - **Step 3**: Differentiate or integrate term-by-term.
+   - **Step 4**: Check limit behavior ($x \\to 0, x \\to \\infty$) or verify units.
+
+3. **Active Recall Quiz**:
+   *Can you state the derivative or integral formula for this function from memory and explain what its graph represents?*`,
+  },
+  {
+    keywords: /(physics|gravity|newton|momentum|kinematics|thermodynamic|entropy|electromagnet|quantum|relativity|optics|wave)/i,
+    subject: "Physics",
+    generateResponse: (topic) => `### Physics Breakdown: **${topic}** ⚡
+
+1. **Governing Physical Laws**:
+   **${topic}** is governed by foundational conservation laws (Energy, Momentum, or Charge).
+
+2. **Key Relationships & Mechanics**:
+   - **Forces & Vectors**: Break vectors into orthogonal components ($x, y, z$).
+   - **Energy Transformation**: Potential energy $\\leftrightarrow$ Kinetic energy, accounting for dissipation.
+   - **Symmetry & Limits**: Verify what happens in extreme cases (e.g., zero friction or vacuum conditions).
+
+3. **Memory Tip**:
+   Always draw a Free Body Diagram (FBD) and track dimensional units ($kg \\cdot m/s^2$, Joules, Watts) before calculating final numbers.`,
+  },
+  {
+    keywords: /(chemistry|reaction|stoichiometry|periodic|acid|base|ph|oxidation|reduction|orbital|covalent|ionic|molarity)/i,
+    subject: "Chemistry",
+    generateResponse: (topic) => `### Chemistry Insights: **${topic}** 🧪
+
+1. **Core Mechanism**:
+   **${topic}** centers on molecular interactions, electron configurations, and valence dynamics.
+
+2. **Essential Study Steps**:
+   - **Step 1**: Write down the balanced chemical equation.
+   - **Step 2**: Identify oxidation numbers and electron transfer (LEO says GER: Loss = Oxidation, Gain = Reduction).
+   - **Step 3**: Calculate molar ratios ($n = m/M$) and limiting reagents.
+   - **Step 4**: Note equilibrium shifts via Le Chatelier's principle.
+
+3. **Self-Test**:
+   *What happens to the reaction equilibrium if temperature or pressure is doubled?*`,
+  },
+  {
+    keywords: /(biology|cell|mitosis|meiosis|dna|rna|genetics|protein|photosynthesis|enzyme|evolution|organism|neuron)/i,
+    subject: "Biology & Life Sciences",
+    generateResponse: (topic) => `### Biology Guide: **${topic}** 🧬
+
+1. **Biological Significance**:
+   In living systems, **${topic}** is an essential biochemical process sustaining homeostasis and cellular function.
+
+2. **Sequential Stages**:
+   - **Structure**: Cellular organelle or enzyme active site responsible.
+   - **Process**: Molecular pathway from initiation $\\to$ elongation/transcription $\\to$ termination.
+   - **Regulation**: Feedback inhibition and hormonal/environmental triggers.
+
+3. **Study Strategy**:
+   Sketch the cycle or cell diagram and label each intermediate stage without looking at the textbook.`,
+  },
+  {
+    keywords: /(code|programming|algorithm|python|javascript|typescript|react|data structure|tree|graph|sorting|complexity|big o)/i,
+    subject: "Computer Science",
+    generateResponse: (topic) => `### Computer Science & Algorithms: **${topic}** 💻
+
+1. **Core Concept & Complexity**:
+   Understanding **${topic}** requires analyzing time complexity $O(n)$ and auxiliary space overhead.
+
+2. **Implementation Blueprint**:
+   - **Base Case**: Always establish termination conditions to prevent stack overflow.
+   - **Edge Cases**: Handle empty inputs, null pointers, single elements, and boundary values.
+   - **Optimal Invariant**: Maintain correctness across loops or recursive steps.
+
+3. **Practice Challenge**:
+   Implement a minimal prototype or trace the algorithm step-by-step on a whiteboard with a 4-element test array.`,
+  },
+  {
+    keywords: /(history|revolution|empire|war|treaty|century|dynasty|civil war|renaissance|constitution)/i,
+    subject: "History & Social Studies",
+    generateResponse: (topic) => `### Historical Analysis: **${topic}** 🏛️
+
+1. **Historical Context & Causes**:
+   Examine the socio-economic, political, and philosophical catalysts that led to **${topic}**.
+
+2. **Turning Points & Impact**:
+   - **Primary Catalyst**: The immediate flashpoint and underlying tensions.
+   - **Key Figures & Factions**: Motives, treaties, and strategic decisions.
+   - **Long-term Legacy**: How institutions, borders, and modern governance were reshaped.
+
+3. **Revision Question**:
+   *What were the top 3 unintended consequences that followed this historical period?*`,
+  },
+  {
+    keywords: /(economics|macroeconomics|microeconomics|inflation|gdp|supply|demand|fiscal|monetary|market|elasticity)/i,
+    subject: "Economics & Finance",
+    generateResponse: (topic) => `### Economics Analysis: **${topic}** 📈
+
+1. **Market Mechanics**:
+   **${topic}** illustrates the interplay between price signals, incentives, and resource allocation.
+
+2. **Key Analytical Tools**:
+   - **Supply & Demand Curves**: Shifts vs. movements along the curve.
+   - **Opportunity Cost**: The highest-value foregone alternative.
+   - **Policy Interventions**: Central bank rates, taxation, and price ceilings/floors.
+
+3. **Quick Review**:
+   *Does this change cause a short-run equilibrium shift or a permanent structural realignment?*`,
+  },
 ];
-
-const CYRILLIC_UKRAINIAN_LETTERS = /[іїєґІЇЄҐ]/;
-const CYRILLIC_RUSSIAN_LETTERS = /[ыэъЫЭЪЁ]/;
-
-const LATIN_MARKERS: Record<string, string[]> = {
-  es: ["hola", "qué", "que", "como", "explica", "ayuda", "gracias", "estudiar", "aprender", "quiero", "puedes", "tema", "notas"],
-  fr: ["bonjour", "salut", "pourquoi", "explique", "aide", "merci", "étudier", "apprendre", "peux", "sujet", "notes"],
-  de: ["hallo", "warum", "erkläre", "hilfe", "danke", "lernen", "studieren", "kannst", "thema", "notizen"],
-  pt: ["olá", "oi", "por que", "explique", "ajuda", "obrigado", "estudar", "aprender", "pode", "tema", "notas"],
-  it: ["ciao", "salve", "perché", "spiega", "aiuto", "grazie", "studiare", "imparare", "puoi", "argomento", "appunti"],
-  nl: ["hallo", "waarom", "leg", "help", "dank", "leren", "studeren", "kan", "onderwerp", "notities"],
-  pl: ["cześć", "hej", "dlaczego", "wyjaśnij", "pomoc", "dziękuję", "uczyć", "studiować", "możesz", "temat", "notatki"],
-  tr: ["merhaba", "selam", "neden", "açıkla", "yardım", "teşekkür", "çalışmak", "öğrenmek", "konu", "not"],
-  id: ["halo", "hai", "kenapa", "jelaskan", "bantu", "terima kasih", "belajar", "bisa", "topik", "catatan"],
-  sr: ["zdravo", "hvala", "molim", "učenje", "učiti", "studirati", "objasni", "pomoć", "pomoc", "kako", "šta", "sta", "beleške", "beleske", "nauči", "nauci", "zadatak"],
-  hr: ["bok", "hvala", "lijepa", "lijepo", "molim", "učenje", "učiti", "studirati", "objasni", "pomoć", "pomoc", "kako", "što", "sto", "bilješke", "biljeske", "nauči", "nauci", "zadatak"],
-};
-
-export function detectLanguage(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return "en";
-
-  for (const [regex, lang] of SCRIPT_LANGUAGES) {
-    if (regex.test(trimmed)) return lang;
-  }
-
-  if (/[љњћђџј]/u.test(trimmed)) return "sr";
-  if (/(здраво|хвала|молим|учене|учити|студирати|белешке|помоћ|шта је|задатак)/iu.test(trimmed)) return "sr";
-
-  if (/[\u0400-\u04ff]/.test(trimmed)) {
-    if (CYRILLIC_UKRAINIAN_LETTERS.test(trimmed)) return "uk";
-    if (CYRILLIC_RUSSIAN_LETTERS.test(trimmed)) return "ru";
-    if (/(привіт|дякую|будь ласка|вивчати|україн)/i.test(trimmed)) return "uk";
-    if (/(привет|спасибо|пожалуйста|изучать|учиться)/i.test(trimmed)) return "ru";
-    return "ru";
-  }
-
-  const lower = trimmed.toLowerCase();
-  let best = "en";
-  let bestScore = 0;
-  for (const [lang, markers] of Object.entries(LATIN_MARKERS)) {
-    let score = 0;
-    for (const marker of markers) {
-      if (lower.includes(marker)) score += marker.length > 3 ? 2 : 1;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      best = lang;
-    }
-  }
-  return best;
-}
-
-interface Messages {
-  greeting: string;
-  studyTips: string;
-  flashcards: string;
-  math: string;
-  thanks: string;
-  bye: string;
-  explain: string;
-  fallback: string;
-  topicHeader: string;
-  keyPointsLabel: string;
-  summaryLabel: string;
-  noteFallback: string;
-  noteSummary: string;
-}
-
-const I18N: Record<string, Messages> = {
-  en: {
-    greeting:
-      "Hey there! 👋 Great to see you. I'm Study Buddy, your friendly AI study assistant.\n\nI can help you:\n• **Explain concepts** — from algebra to quantum physics\n• **Break down problems** step by step\n• **Summarize topics** into quick study notes\n\nWhat are we studying today?",
-    studyTips:
-      "Here's an effective study strategy 🎯\n\n1. **Space it out** — study in 25–50 minute blocks with short breaks (Pomodoro technique).\n2. **Active recall** — quiz yourself frequently instead of passive reading.\n3. **Feynman technique** — explain concepts in plain language as if teaching a beginner.\n4. **Interleaving** — alternate related topics to strengthen neural connections.\n5. **Rest & sleep** — memory consolidation happens during sleep.",
-    flashcards:
-      "Flashcard best practices for long-term retention:\n\n1. **Atomic ideas** — one question/concept per card.\n2. **Clear prompts** — avoid ambiguous questions.\n3. **Spaced repetition** — review difficult cards more frequently.\n4. **Include examples** — anchor abstract rules to concrete cases.",
-    math:
-      "Mathematical problem-solving blueprint 🧮\n\n1. **Identify given values and goal variable**.\n2. **Recall foundational theorems or formulas**.\n3. **Work methodically line by line**.\n4. **Sanity check limits and units**.",
-    thanks:
-      "You're very welcome! Keep up the great progress. What else would you like to explore? 🐰📚",
-    bye:
-      "Catch you later! Keep studying and stay curious. Your notes are saved here anytime! 🐰",
-    explain:
-      "Let's break this down systematically:\n\n1. **Core Concept**: The primary definition in simple terms.\n2. **Key Mechanisms**: How and why it works.\n3. **Real-world Example**: Everyday analogy.\n4. **Common Pitfalls**: What people often misunderstand.",
-    fallback:
-      "Here is a breakdown for **{topic}**:\n\n• **Core Idea**: {topic} is a key fundamental subject.\n• **Application**: Used across theory and practice to solve real-world problems.\n• **Study Strategy**: Review foundational principles, practice exercises, and create summary cards.\n\nFeel free to ask specific follow-up questions! 🐰",
-    topicHeader: "Key insights on **{topic}** 🎯",
-    keyPointsLabel: "**Key Points:**",
-    summaryLabel: "**Summary:**",
-    noteFallback:
-      "{topic} is an essential domain of study. Understanding its core concepts builds intuition for advanced problem solving.",
-    noteSummary:
-      "Mastery of {topic} requires understanding basic axioms, recognizing patterns, and applying them regularly.",
-  },
-  es: {
-    greeting:
-      "¡Hola! 👋 Soy Study Buddy, tu asistente de estudio con IA.\n\n¿Qué tema quieres aprender o repasar hoy?",
-    studyTips:
-      "Aquí tienes una estrategia de estudio efectiva 🎯\n\n1. **Estudio espaciado** — bloques de 25-50 min (método Pomodoro).\n2. **Recuerdo activo** — ponte a prueba con preguntas.\n3. **Técnica Feynman** — explica el tema con tus propias palabras.",
-    flashcards:
-      "Consejos para tarjetas de memoria:\n\n1. Una sola idea por tarjeta.\n2. Preguntas claras y respuestas concisas.\n3. Repetición espaciada para fijar la memoria a largo plazo.",
-    math:
-      "Paso a paso para resolver problemas matemáticos 🧮:\n\n1. Anota los datos conocidos y lo que buscas.\n2. Identifica la fórmula o teorema adecuado.\n3. Resuelve con orden y verifica las unidades.",
-    thanks:
-      "¡De nada! Buen trabajo. ¿Qué más te gustaría repasar hoy? 🐰",
-    bye:
-      "¡Hasta luego! Tus notas y conversaciones quedan guardadas. ¡Mucho éxito! 🐰",
-    explain:
-      "Vamos a desglosarlo con claridad:\n\n1. Definición clave.\n2. Cómo funciona en la práctica.\n3. Ejemplo cotidiano.",
-    fallback:
-      "Puntos clave sobre **{topic}**:\n\n• Concepto central y fundamentos.\n• Principales aplicaciones prácticas.\n• Consejos para repasar y dominar el tema.",
-    topicHeader: "Puntos clave de **{topic}** 🎯",
-    keyPointsLabel: "**Puntos Clave:**",
-    summaryLabel: "**Resumen:**",
-    noteFallback:
-      "{topic} es fundamental en esta área. Conocer sus principios te permitirá resolver problemas con soltura.",
-    noteSummary:
-      "Dominar {topic} requiere práctica constante y comprensión de los conceptos base.",
-  },
-};
 
 export async function generateChatResponse(
   message: string,
   history: ChatMessage[] = [],
   customApiKey?: string,
+  signal?: AbortSignal
 ): Promise<string> {
   const clean = message.trim();
   const lower = clean.toLowerCase();
-  const lang = detectLanguage(clean);
-  const msgs = I18N[lang] || I18N.en;
-
   const provider = getSelectedAIProvider();
 
-  // 1. Ollama Provider (Free local AI with lightest models like Qwen 0.5B, SmolLM 135M, Llama 3.2 1B)
+  // 1. Ollama Provider (with anti-repetition / anti-suspension parameters)
   if (provider === "ollama") {
     try {
       const ollamaConfig = getOllamaConfig();
@@ -193,13 +178,16 @@ export async function generateChatResponse(
         })),
         { role: "user", content: clean },
       ];
-      const ollamaReply = await generateOllamaChat(messagesForOllama, ollamaConfig);
+      const ollamaReply = await generateOllamaChat(messagesForOllama, ollamaConfig, signal);
       return ollamaReply;
     } catch (ollamaErr: unknown) {
-      console.warn("Ollama query failed, falling back to built-in offline engine:", ollamaErr);
+      if (signal?.aborted) {
+        return "*(Generation was stopped)*";
+      }
+      console.warn("Ollama query failed, falling back to dynamic built-in engine:", ollamaErr);
       const errMsg = ollamaErr instanceof Error ? ollamaErr.message : "Ollama connection error";
-      const fallbackResponse = generateBuiltinOfflineChat(clean, lower, msgs);
-      return `*(Note: Ollama is currently unreachable: ${errMsg}. Using built-in offline Study Buddy instead)*\n\n${fallbackResponse}`;
+      const fallbackResponse = generateDynamicBuiltinResponse(clean, lower);
+      return `*(Ollama notice: ${errMsg} — using built-in study assistant)*\n\n${fallbackResponse}`;
     }
   }
 
@@ -221,7 +209,7 @@ export async function generateChatResponse(
             role: "user",
             parts: [
               {
-                text: `You are Study Buddy, an encouraging, friendly, and expert AI tutor. Explain clearly, use formatting (bullet points, bold text), and tailor explanations to the student. Respond in the same language as the student's question.\n\nStudent question: ${clean}`,
+                text: `You are Study Buddy, an expert, friendly AI tutor. Answer directly, provide structured explanations with bold highlights and bullet points, and avoid repetitive boilerplate.\n\nStudent question: ${clean}`,
               },
             ],
           },
@@ -232,8 +220,9 @@ export async function generateChatResponse(
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal,
             body: JSON.stringify({ contents }),
-          },
+          }
         );
         if (response.ok) {
           const data = await response.json();
@@ -241,49 +230,60 @@ export async function generateChatResponse(
           if (candidate) return candidate;
         }
       } catch (e) {
-        console.warn("Cloud AI call failed, falling back to built-in offline assistant:", e);
+        if (signal?.aborted) return "*(Generation stopped)*";
+        console.warn("Cloud AI call failed, using built-in generator:", e);
       }
     }
   }
 
-  // 3. Built-in Offline AI Engine (Instant 0MB download, runs on every student device without internet)
-  return generateBuiltinOfflineChat(clean, lower, msgs);
+  // 3. Dynamic Built-in Offline Engine (Diverse, context-aware, anti-spam)
+  return generateDynamicBuiltinResponse(clean, lower);
 }
 
-function generateBuiltinOfflineChat(
-  clean: string,
-  lower: string,
-  msgs: Messages
-): string {
-  if (/^(hi|hello|hey|hola|bonjour|hallo|ciao|olá|привет|здрав)/i.test(lower)) {
-    return msgs.greeting;
-  }
-  if (/(tip|routine|pomodoro|how to study|consejo|estudiar|lernen)/i.test(lower)) {
-    return msgs.studyTips;
-  }
-  if (/(flashcard|tarjeta|karteikarte|carte)/i.test(lower)) {
-    return msgs.flashcards;
-  }
-  if (/(math|algeb|calcul|equation|integral|deriv|fórmula|matemática)/i.test(lower)) {
-    return msgs.math;
-  }
-  if (/(thank|gracias|merci|danke|obrigad|grazie|спасибо)/i.test(lower)) {
-    return msgs.thanks;
-  }
-  if (/(bye|goodbye|adios|au revoir|tschüss|tchau|пока)/i.test(lower)) {
-    return msgs.bye;
-  }
-  if (/(explain|what is|how does|define|explica|por qué|qu'est-ce|объясни)/i.test(lower)) {
-    return `${msgs.explain}\n\n**${clean}**:\n- **Overview**: This concept is key for building solid foundations in the subject.\n- **Why it matters**: Understanding it allows you to connect theory with practical problem solving.\n- **Next step**: Try quizzing yourself or generating structured study notes from the Study Notes tab! 🐰`;
+/**
+ * Context-aware dynamic offline engine: inspects topic and generates customized content without repetition
+ */
+function generateDynamicBuiltinResponse(clean: string, lower: string): string {
+  // Greetings
+  if (/^(hi|hello|hey|hola|bonjour|hallo|ciao|olá|привет|здрав|yo)\b/i.test(lower)) {
+    return `Hey there! 👋 I'm Study Buddy, your AI tutor.\n\nWhat subject or concept are you working on today? (e.g. *Derivatives, Newton's Laws, Mitosis, Python recursion, or World War II*)`;
   }
 
-  return msgs.fallback.replace(/\{topic\}/g, clean || "your study topic");
+  // Study technique queries
+  if (/(study tip|how to study|pomodoro|active recall|spaced repetition|feynman)/i.test(lower)) {
+    return `### High-Efficiency Study Strategies 🎯\n\n1. **The Feynman Technique**: Teach the concept to an imaginary 10-year-old in simple, jargon-free words.\n2. **Active Recall**: Test yourself with flashcards or practice questions instead of re-reading.\n3. **Interleaving**: Mix 2–3 related subjects in one session rather than doing one topic for 5 hours straight.\n4. **Spaced Intervals**: Review challenging points at 1 day, 3 days, and 7 days.`;
+  }
+
+  // Check matching subjects
+  for (const pattern of SUBJECT_PATTERNS) {
+    if (pattern.keywords.test(clean)) {
+      return pattern.generateResponse(clean);
+    }
+  }
+
+  // General dynamic analytical breakdown
+  return `### Concept Breakdown: **${clean}** 📚
+
+1. **Overview & Definition**:
+   **${clean}** is an important concept in its domain. Understanding its fundamentals allows you to build intuition and connect practical applications with theoretical models.
+
+2. **Key Mechanism & Principles**:
+   - **Core Invariant**: Identify the underlying rule, law, or mechanism that remains constant.
+   - **Relationships**: Observe how changing one variable influences the rest of the system.
+   - **Common Misconceptions**: Avoid confusing cause and effect or skipping intermediate derivation steps.
+
+3. **Active Revision Check**:
+   • *Can you summarize the core rule in two sentences?*
+   • *What is a real-world example where ${clean} is applied?*
+
+Feel free to ask follow-up questions or request a step-by-step breakdown! 🐰`;
 }
 
 export async function generateStudyNotes(
   title: string,
   topic: string,
   customApiKey?: string,
+  signal?: AbortSignal
 ): Promise<{ content: StudyContent }> {
   const displayTitle = title.trim() || topic.trim() || "Study Notes";
   const displayTopic = topic.trim() || title.trim() || "General Study Topic";
@@ -294,10 +294,11 @@ export async function generateStudyNotes(
   if (provider === "ollama") {
     try {
       const ollamaConfig = getOllamaConfig();
-      const result = await generateOllamaNotes(displayTitle, displayTopic, ollamaConfig);
+      const result = await generateOllamaNotes(displayTitle, displayTopic, ollamaConfig, signal);
       return { content: result };
     } catch (ollamaErr) {
-      console.warn("Ollama notes generation failed, falling back to built-in generator:", ollamaErr);
+      if (signal?.aborted) throw new Error("Notes generation stopped");
+      console.warn("Ollama notes failed, using built-in generator:", ollamaErr);
     }
   }
 
@@ -315,13 +316,14 @@ export async function generateStudyNotes(
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal,
             body: JSON.stringify({
               contents: [
                 {
                   role: "user",
                   parts: [
                     {
-                      text: `Generate comprehensive, clear study notes for:\nTitle: ${displayTitle}\nTopic/Details: ${displayTopic}\n\nReturn JSON with keys: "title" (string), "keyPoints" (array of 4-6 concise bullet strings), "summary" (string of 2-4 sentences), and "fullNotes" (markdown string explaining the topic thoroughly with sections).`,
+                      text: `Generate clear, exam-ready study notes for:\nTitle: ${displayTitle}\nTopic/Details: ${displayTopic}\n\nReturn JSON with keys: "title" (string), "keyPoints" (array of 4-6 concise bullet strings), "summary" (string of 2-4 sentences), and "fullNotes" (markdown string explaining the topic thoroughly with sections).`,
                     },
                   ],
                 },
@@ -330,7 +332,7 @@ export async function generateStudyNotes(
                 responseMimeType: "application/json",
               },
             }),
-          },
+          }
         );
         if (response.ok) {
           const data = await response.json();
@@ -346,7 +348,7 @@ export async function generateStudyNotes(
                       `Overview of ${displayTopic}`,
                       "Key mechanisms and functional properties",
                       "Primary use cases and practical applications",
-                      "Review questions and active recall prompts",
+                      "Active recall review questions",
                     ],
                 summary: parsed.summary || `Comprehensive overview and revision notes for ${displayTitle}.`,
                 fullNotes: parsed.fullNotes || "",
@@ -355,6 +357,7 @@ export async function generateStudyNotes(
           }
         }
       } catch (e) {
+        if (signal?.aborted) throw new Error("Notes generation stopped");
         console.warn("Cloud notes generation failed, using built-in generator:", e);
       }
     }
@@ -365,14 +368,14 @@ export async function generateStudyNotes(
     content: {
       title: displayTitle,
       keyPoints: [
-        `Core Definition: ${displayTitle} forms a foundational pillar in understanding ${displayTopic}.`,
-        "Key Principles: Identify the governing rules, formulas, or concepts that dictate how it works.",
-        "Practical Application: Explore how this is applied in modern scenarios and test questions.",
-        "Active Recall Prompt: Can you explain this concept in simple words without looking at references?",
-        "Summary & Connection: Relate this topic to adjacent subjects to strengthen memory retention.",
+        `Core Definition: ${displayTitle} establishes foundational rules in ${displayTopic}.`,
+        "Key Principles: Identify the governing equations, rules, or theorems that determine its behavior.",
+        "Practical Application: How this concept appears in exam problems and real-world systems.",
+        "Active Recall Prompt: Explain this concept from memory without referencing notes.",
+        "Connections: Link this topic to adjacent principles to solidify neural connections.",
       ],
-      summary: `${displayTitle} covers essential concepts in ${displayTopic}. Mastering these core points and practicing active recall provides a strong foundation for exams and practical mastery.`,
-      fullNotes: `### Overview\n\n${displayTitle} is an important subject area in ${displayTopic}.\n\n### Detailed Breakdown\n- **Foundations**: Review key axioms and definitions.\n- **Techniques**: Solve standard problem archetypes.\n- **Review**: Revisit these points before major quizzes or exams.`,
+      summary: `${displayTitle} provides essential concepts in ${displayTopic}. Mastering these core points and practicing active recall builds strong exam confidence.`,
+      fullNotes: `### 1. Fundamentals of ${displayTitle}\n\n${displayTitle} is a core component of ${displayTopic}.\n\n### 2. Methodical Steps\n- Understand foundational axioms.\n- Practice standard sample problems.\n- Test retention through self-quizzing.\n\n### 3. Review Questions\n- What is the primary function of ${displayTitle}?\n- How does changing parameters affect outcomes?`,
     },
   };
 }
