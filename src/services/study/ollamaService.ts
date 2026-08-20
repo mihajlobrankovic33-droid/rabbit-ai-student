@@ -1,7 +1,7 @@
 /**
  * Ollama Local AI Service
- * Connects to local Ollama instance with anti-repetition / anti-suspension parameters
- * and lightweight models (Qwen 0.5B, SmolLM 135M, Llama 3.2 1B, TinyLlama).
+ * Connects to local Ollama instance with anti-repetition safeguards,
+ * multi-language support, and resilient notes parsing.
  */
 
 export interface OllamaModelInfo {
@@ -16,7 +16,7 @@ export interface OllamaConfig {
   selectedModel: string; // default: 'qwen2.5:0.5b'
   temperature: number; // default: 0.75
   repeatPenalty: number; // default: 1.30 (breaks repetition loops)
-  maxTokens: number; // default: 800
+  maxTokens: number; // default: 1000
 }
 
 export const RECOMMENDED_LIGHT_MODELS = [
@@ -24,7 +24,7 @@ export const RECOMMENDED_LIGHT_MODELS = [
     id: "qwen2.5:0.5b",
     name: "Qwen 2.5 (0.5B)",
     sizeLabel: "~398 MB",
-    description: "Recommended lightest: Fast, multilingual, low RAM (<1GB), high accuracy",
+    description: "Recommended lightest: Fast, multilingual, low RAM (<1GB), high accuracy across all subjects",
     command: "ollama run qwen2.5:0.5b",
   },
   {
@@ -76,7 +76,7 @@ export function getOllamaConfig(): OllamaConfig {
         selectedModel: parsed.selectedModel || "qwen2.5:0.5b",
         temperature: typeof parsed.temperature === "number" ? parsed.temperature : 0.75,
         repeatPenalty: typeof parsed.repeatPenalty === "number" ? parsed.repeatPenalty : 1.3,
-        maxTokens: typeof parsed.maxTokens === "number" ? parsed.maxTokens : 800,
+        maxTokens: typeof parsed.maxTokens === "number" ? parsed.maxTokens : 1000,
       };
     }
   } catch (e) {
@@ -87,7 +87,7 @@ export function getOllamaConfig(): OllamaConfig {
     selectedModel: "qwen2.5:0.5b",
     temperature: 0.75,
     repeatPenalty: 1.3,
-    maxTokens: 800,
+    maxTokens: 1000,
   };
 }
 
@@ -161,14 +161,12 @@ function cleanHistoryForOllama(
   const result: Array<{ role: string; content: string }> = [];
   const seenContent = new Set<string>();
 
-  // Take the most recent 6 messages
   const recent = messages.slice(-6);
 
   for (const msg of recent) {
     const trimmed = msg.content.trim();
     if (!trimmed) continue;
 
-    // Avoid passing exact duplicate messages in a row
     const key = `${msg.role}:${trimmed.slice(0, 80)}`;
     if (seenContent.has(key)) {
       continue;
@@ -181,7 +179,7 @@ function cleanHistoryForOllama(
 }
 
 /**
- * Generate chat completion via Ollama `/api/chat` with Anti-Repetition & Anti-Suspension safeguards
+ * Generate chat completion via Ollama `/api/chat` with Anti-Repetition & Multi-Language capabilities
  */
 export async function generateOllamaChat(
   messages: Array<{ role: string; content: string }>,
@@ -194,14 +192,13 @@ export async function generateOllamaChat(
   const systemMessage = {
     role: "system",
     content:
-      "You are Study Buddy, an expert, engaging AI tutor. Give direct, fresh explanations without repeating previous responses. Use markdown formatting with bullet points and bold highlights. Never get stuck repeating phrases or questions.",
+      "You are Study Buddy, an expert universal AI tutor. CRITICAL INSTRUCTION: You MUST always respond in the EXACT SAME LANGUAGE as the user's prompt (e.g. Serbian, Bosnian, Croatian, Spanish, German, French, Italian, Russian, English, or any language). Provide accurate, high-quality explanations, formulas, derivations, and study help for ANY academic, technical, or practical subject without restrictions. Avoid repetition.",
   };
 
   const sanitizedMessages = cleanHistoryForOllama(messages);
 
-  // Use a 30s timeout controller linked to the external signal if provided
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
+  const timeoutId = setTimeout(() => timeoutController.abort(), 45000);
 
   const combinedSignal = signal
     ? createCombinedSignal([signal, timeoutController.signal])
@@ -217,9 +214,8 @@ export async function generateOllamaChat(
         messages: [systemMessage, ...sanitizedMessages],
         stream: false,
         options: {
-          // Anti-repetition & Anti-suspension parameters
           temperature: currentConfig.temperature,
-          repeat_penalty: currentConfig.repeatPenalty, // Prevents repetitive loops
+          repeat_penalty: currentConfig.repeatPenalty,
           repeat_last_n: 128,
           presence_penalty: 0.7,
           frequency_penalty: 0.7,
@@ -242,9 +238,7 @@ export async function generateOllamaChat(
       throw new Error("Ollama returned an empty response.");
     }
 
-    // Clean up any repeated trailing sentences
     text = cleanRepeatedTrailingPhrases(text);
-
     return text;
   } catch (err: unknown) {
     clearTimeout(timeoutId);
@@ -256,7 +250,105 @@ export async function generateOllamaChat(
 }
 
 /**
- * Generate structured study notes via Ollama with anti-repetition protection
+ * Robust extraction of study notes from raw model output (JSON or structured markdown) in any language.
+ */
+export function parseStudyNotesResponse(
+  rawText: string,
+  fallbackTitle: string,
+  fallbackTopic: string
+): {
+  title: string;
+  keyPoints: string[];
+  summary: string;
+  fullNotes: string;
+} {
+  const clean = rawText.trim();
+  if (!clean) {
+    return {
+      title: fallbackTitle,
+      keyPoints: [
+        fallbackTopic || fallbackTitle,
+      ],
+      summary: `${fallbackTitle}`,
+      fullNotes: `### ${fallbackTitle}\n\n${fallbackTopic}`,
+    };
+  }
+
+  // 1. Try parsing JSON (direct or inside markdown code fence or braces)
+  try {
+    let jsonString = clean;
+    const jsonBlockMatch = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (jsonBlockMatch) {
+      jsonString = jsonBlockMatch[1].trim();
+    } else {
+      const firstBrace = clean.indexOf("{");
+      const lastBrace = clean.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace < lastBrace) {
+        jsonString = clean.substring(firstBrace, lastBrace + 1);
+      }
+    }
+
+    const parsed = JSON.parse(jsonString);
+    if (parsed && typeof parsed === "object") {
+      const title = String(parsed.title || fallbackTitle).trim();
+      const rawPoints = Array.isArray(parsed.keyPoints) ? parsed.keyPoints : [];
+      const keyPoints = rawPoints.map((p: unknown) => String(p).trim()).filter(Boolean);
+      const summary = String(parsed.summary || "").trim();
+      const fullNotes = String(parsed.fullNotes || "").trim();
+
+      if (keyPoints.length > 0 || summary || fullNotes) {
+        return {
+          title: title || fallbackTitle,
+          keyPoints: keyPoints.length > 0 ? keyPoints : [summary || title],
+          summary: summary || (keyPoints[0] ?? title),
+          fullNotes: fullNotes || clean,
+        };
+      }
+    }
+  } catch {
+    // JSON parsing didn't match, fallback to intelligent markdown extraction
+  }
+
+  // 2. Intelligent Markdown / Natural Language section parser
+  const lines = clean.split("\n").map((l) => l.trim()).filter(Boolean);
+  const bullets: string[] = [];
+  const paragraphs: string[] = [];
+
+  for (const line of lines) {
+    // Extract bullets (- , * , • , 1. , 2) , etc.) in any language
+    const bulletMatch = line.match(/^[-*•]\s+(.+)$/) || line.match(/^\d+[.)]\s+(.+)$/);
+    if (bulletMatch) {
+      const pt = bulletMatch[1].replace(/^\*\*|\*\*$/g, "").trim();
+      if (pt.length > 3) {
+        bullets.push(pt);
+      }
+    } else if (!line.startsWith("#") && !line.startsWith("```")) {
+      if (line.length > 12) {
+        paragraphs.push(line);
+      }
+    }
+  }
+
+  const title = fallbackTitle || lines.find((l) => l.startsWith("#"))?.replace(/^#+\s*/, "") || "Study Notes";
+  const summary = paragraphs.length > 0 ? paragraphs[0] : (bullets[0] || `${title}`);
+  const keyPoints = bullets.length >= 2
+    ? bullets.slice(0, 8)
+    : paragraphs.length >= 2
+    ? paragraphs.slice(0, 5)
+    : bullets.length > 0
+    ? bullets
+    : [summary];
+
+  return {
+    title,
+    keyPoints,
+    summary,
+    fullNotes: clean,
+  };
+}
+
+/**
+ * Generate structured study notes via Ollama for any subject in any language
  */
 export async function generateOllamaNotes(
   title: string,
@@ -267,31 +359,37 @@ export async function generateOllamaNotes(
   title: string;
   keyPoints: string[];
   summary: string;
-  fullNotes?: string;
+  fullNotes: string;
 }> {
   const currentConfig = { ...getOllamaConfig(), ...config };
   const cleanUrl = currentConfig.baseUrl.replace(/\/+$/, "");
 
-  const prompt = `You are an expert study assistant.
-Generate comprehensive, unique study notes for:
-Topic Title: ${title}
-Specific Details: ${topic}
+  // Flexible prompt that guides the model to answer in the user's language without crashing on rigid schemas
+  const prompt = `You are Study Buddy, an expert universal AI tutor.
+Generate comprehensive, exam-ready study notes for:
+TOPIC: ${title}
+DETAILS / SUBTOPICS: ${topic || title}
 
-Output pure JSON only:
+CRITICAL RULES:
+1. LANGUAGE: You MUST write the ENTIRE notes in the EXACT SAME LANGUAGE as the topic title provided above (e.g. if in Serbian/Croatian/Bosnian, write in Serbian/Croatian/Bosnian; if in Spanish, German, French, English, etc., write in that language).
+2. ACCURACY: Provide deep, accurate explanations for any subject (STEM, medicine, history, programming, law, languages, etc.) without restriction.
+3. STRUCTURE: Include key learning points/mechanisms, a clear summary, and detailed sections with formulas or step-by-step concepts.
+
+You can return JSON or structured markdown:
 {
   "title": "${title}",
   "keyPoints": [
-    "Key mechanism or definition",
-    "Essential formula or core rule",
-    "Practical real-world application",
-    "Active recall review question"
+    "Key mechanism 1",
+    "Key formula / principle 2",
+    "Practical application 3",
+    "Active recall review question 4"
   ],
-  "summary": "2-3 sentence summary of the core idea.",
-  "fullNotes": "Detailed section breakdown in markdown."
+  "summary": "Clear summary of the core concept.",
+  "fullNotes": "Comprehensive in-depth notes with markdown headings, explanations, and active recall practice."
 }`;
 
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 35000);
+  const timeoutId = setTimeout(() => timeoutController.abort(), 60000);
 
   const combinedSignal = signal
     ? createCombinedSignal([signal, timeoutController.signal])
@@ -305,12 +403,14 @@ Output pure JSON only:
       body: JSON.stringify({
         model: currentConfig.selectedModel || "qwen2.5:0.5b",
         prompt,
-        format: "json",
         stream: false,
         options: {
           temperature: currentConfig.temperature,
           repeat_penalty: currentConfig.repeatPenalty,
-          num_predict: 900,
+          repeat_last_n: 128,
+          presence_penalty: 0.5,
+          frequency_penalty: 0.5,
+          num_predict: 1200,
         },
       }),
     });
@@ -324,37 +424,13 @@ Output pure JSON only:
     const data = await response.json();
     const rawText = data?.response || "";
 
-    const parsed = JSON.parse(rawText);
-    return {
-      title: parsed.title || title,
-      keyPoints: Array.isArray(parsed.keyPoints) && parsed.keyPoints.length > 0
-        ? parsed.keyPoints
-        : [
-            `Core principles of ${title}`,
-            `Mechanisms and formulas for ${topic || title}`,
-            `Practical study and revision strategies`,
-            `Active recall prompt for self-testing`,
-          ],
-      summary: parsed.summary || `Key study summary for ${title}.`,
-      fullNotes: parsed.fullNotes || "",
-    };
-  } catch {
+    return parseStudyNotesResponse(rawText, title, topic);
+  } catch (err: unknown) {
     clearTimeout(timeoutId);
     if (signal?.aborted) {
       throw new Error("Notes generation stopped.");
     }
-    // Return structured breakdown
-    return {
-      title,
-      keyPoints: [
-        `Overview of ${title}`,
-        `Essential concepts in ${topic || title}`,
-        `Practice and revision tips`,
-        `Self-quiz recall question for ${title}`,
-      ],
-      summary: `Comprehensive summary and study guide for ${title}.`,
-      fullNotes: `### ${title}\n\nKey study principles for ${topic || title}.`,
-    };
+    throw err;
   }
 }
 
@@ -369,7 +445,6 @@ function cleanRepeatedTrailingPhrases(text: string): string {
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed.length > 10 && recentLines.has(trimmed)) {
-      // Skip repeated identical line
       continue;
     }
     if (trimmed.length > 10) {

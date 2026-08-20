@@ -14,21 +14,24 @@ import {
   Cpu,
   Download,
   WifiOff,
-  Check,
   RefreshCw,
-  Copy,
   HardDriveDownload,
   CheckCircle2,
   AlertCircle,
-  Key,
-  ShieldAlert,
-  RotateCcw,
+  Zap,
 } from "lucide-react";
 import {
   AIProvider,
   getSelectedAIProvider,
   setSelectedAIProvider,
 } from "@/services/study/aiService";
+import {
+  IN_BROWSER_MODELS,
+  getSavedBrowserModel,
+  setSavedBrowserModel,
+  getOrInitInBrowserEngine,
+  isModelLoadedInBrowser,
+} from "@/services/study/webLlmService";
 import {
   RECOMMENDED_LIGHT_MODELS,
   checkOllamaConnection,
@@ -47,20 +50,23 @@ interface SettingsModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const GEMINI_KEY_STORAGE = "study_buddy_gemini_key";
-
 export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<"ai" | "offline">("ai");
 
   // AI Provider state
-  const [provider, setProvider] = useState<AIProvider>("builtin_offline");
+  const [provider, setProvider] = useState<AIProvider>("in_browser");
+
+  // In-Browser WebLLM state
+  const [browserModel, setBrowserModel] = useState<string>(IN_BROWSER_MODELS[0].id);
+  const [isDownloadingBrowserModel, setIsDownloadingBrowserModel] = useState(false);
+  const [browserModelProgressText, setBrowserModelProgressText] = useState("");
+  const [browserModelPercent, setBrowserModelPercent] = useState(0);
+  const [isBrowserModelReady, setIsBrowserModelReady] = useState(false);
 
   // Ollama state
   const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
   const [selectedModel, setSelectedModel] = useState("qwen2.5:0.5b");
   const [customModel, setCustomModel] = useState("");
-  const [repeatPenalty, setRepeatPenalty] = useState(1.3);
-  const [temperature, setTemperature] = useState(0.75);
 
   const [isTestingOllama, setIsTestingOllama] = useState(false);
   const [ollamaStatus, setOllamaStatus] = useState<{
@@ -75,9 +81,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     models: [],
   });
 
-  // Gemini state
-  const [geminiKey, setGeminiKey] = useState("");
-
   // Offline / SW state
   const [isAppCached, setIsAppCached] = useState(false);
   const [isDownloadingApp, setIsDownloadingApp] = useState(false);
@@ -86,15 +89,40 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   useEffect(() => {
     if (open) {
       setProvider(getSelectedAIProvider());
+      const savedModel = getSavedBrowserModel();
+      setBrowserModel(savedModel);
+      setIsBrowserModelReady(isModelLoadedInBrowser(savedModel));
+
       const ollamaCfg = getOllamaConfig();
       setOllamaUrl(ollamaCfg.baseUrl);
       setSelectedModel(ollamaCfg.selectedModel);
-      setRepeatPenalty(ollamaCfg.repeatPenalty || 1.3);
-      setTemperature(ollamaCfg.temperature || 0.75);
-      setGeminiKey(localStorage.getItem(GEMINI_KEY_STORAGE) || "");
       setIsAppCached(isAppLocallyCached());
     }
   }, [open]);
+
+  const handleDownloadInBrowserModel = async () => {
+    setIsDownloadingBrowserModel(true);
+    setBrowserModelProgressText("Initializing WebGPU shader pipeline...");
+    setBrowserModelPercent(5);
+
+    try {
+      await getOrInitInBrowserEngine(browserModel, (report) => {
+        setBrowserModelProgressText(report.text);
+        if (typeof report.progress === "number" && !isNaN(report.progress)) {
+          setBrowserModelPercent(Math.round(report.progress * 100));
+        }
+      });
+      setIsBrowserModelReady(true);
+      setSavedBrowserModel(browserModel);
+      toast.success("AI Model successfully downloaded into your browser cache!");
+    } catch (err: unknown) {
+      console.error("WebLLM load error:", err);
+      const msg = err instanceof Error ? err.message : "Failed to load model in browser.";
+      toast.error(`Download notice: ${msg}. Built-in Brain will assist you automatically!`);
+    } finally {
+      setIsDownloadingBrowserModel(false);
+    }
+  };
 
   const handleTestOllama = async () => {
     setIsTestingOllama(true);
@@ -110,17 +138,11 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       if (result.connected) {
         toast.success(`Ollama connected! (${result.latencyMs}ms, ${result.models.length} models installed)`);
       } else {
-        toast.error("Could not reach Ollama. Check terminal instructions below.");
+        toast.error("Could not reach Ollama. Switch to In-Browser AI or Built-in Brain.");
       }
     } finally {
       setIsTestingOllama(false);
     }
-  };
-
-  const handleResetAntiRepetition = () => {
-    setRepeatPenalty(1.35);
-    setTemperature(0.75);
-    toast.success("Anti-loop settings reset to Strong Protection (Penalty: 1.35).");
   };
 
   const handleDownloadOfflineApp = async () => {
@@ -147,18 +169,14 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
 
   const handleSaveAll = () => {
     setSelectedAIProvider(provider);
+    setSavedBrowserModel(browserModel);
     saveOllamaConfig({
       baseUrl: ollamaUrl.trim() || "http://localhost:11434",
       selectedModel: customModel.trim() || selectedModel,
-      repeatPenalty: Number(repeatPenalty) || 1.3,
-      temperature: Number(temperature) || 0.75,
+      repeatPenalty: 1.3,
+      temperature: 0.75,
     });
-    if (geminiKey.trim()) {
-      localStorage.setItem(GEMINI_KEY_STORAGE, geminiKey.trim());
-    } else {
-      localStorage.removeItem(GEMINI_KEY_STORAGE);
-    }
-    toast.success("Settings saved with Anti-Repetition safeguards!");
+    toast.success("Settings saved successfully!");
     onOpenChange(false);
   };
 
@@ -171,9 +189,9 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               <Cpu className="h-5 w-5" />
             </div>
             <div>
-              <DialogTitle className="text-lg font-bold">AI & Offline Settings</DialogTitle>
+              <DialogTitle className="text-lg font-bold">AI Models & Offline Settings</DialogTitle>
               <DialogDescription className="text-xs">
-                Configure lightweight offline AI models (Ollama, Built-in) with anti-loop safeguards and Service Worker caching.
+                Download and run open-source AI models right inside this website, or connect to Ollama.
               </DialogDescription>
             </div>
           </div>
@@ -191,7 +209,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
             }`}
           >
             <Sparkles className="h-3.5 w-3.5 text-primary" />
-            AI Model & Ollama
+            In-Browser AI & Models
           </button>
           <button
             type="button"
@@ -203,7 +221,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
             }`}
           >
             <Download className="h-3.5 w-3.5 text-emerald-500" />
-            Service Worker & Offline Cache
+            Offline Cache (PWA)
           </button>
         </div>
 
@@ -212,10 +230,31 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
             {/* AI Provider selection */}
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Select AI Engine
+                Choose AI Engine
               </label>
               <div className="grid gap-2 sm:grid-cols-3">
-                {/* 1. Ollama */}
+                {/* 1. In-Browser AI */}
+                <button
+                  type="button"
+                  onClick={() => setProvider("in_browser")}
+                  className={`cursor-pointer rounded-xl border p-3 text-left transition-all ${
+                    provider === "in_browser"
+                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary"
+                      : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-sm text-foreground">In-Browser AI</span>
+                    <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                      Direct in Site
+                    </span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    Download & run AI directly inside your browser cache. No terminal required!
+                  </p>
+                </button>
+
+                {/* 2. Ollama Local Daemon */}
                 <button
                   type="button"
                   onClick={() => setProvider("ollama")}
@@ -226,17 +265,17 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-sm text-foreground">Ollama (Local AI)</span>
-                    <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
-                      Free & Offline
+                    <span className="font-bold text-sm text-foreground">Ollama Daemon</span>
+                    <span className="rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                      Terminal
                     </span>
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Runs lightweight models on your laptop without internet with anti-repetition protection.
+                    Connect to your local Ollama daemon running on your computer.
                   </p>
                 </button>
 
-                {/* 2. Built-in Offline Brain */}
+                {/* 3. Built-in Brain */}
                 <button
                   type="button"
                   onClick={() => setProvider("builtin_offline")}
@@ -248,37 +287,105 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-bold text-sm text-foreground">Built-in Brain</span>
-                    <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
-                      0MB / Instant
-                    </span>
-                  </div>
-                  <p className="text-[11px] leading-relaxed">
-                    Zero install. Guaranteed to work instantly on any student phone or Chromebook.
-                  </p>
-                </button>
-
-                {/* 3. Gemini Cloud */}
-                <button
-                  type="button"
-                  onClick={() => setProvider("gemini")}
-                  className={`cursor-pointer rounded-xl border p-3 text-left transition-all ${
-                    provider === "gemini"
-                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary"
-                      : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-sm text-foreground">Google Gemini</span>
                     <span className="rounded-md bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-bold text-purple-600 dark:text-purple-400">
-                      Cloud
+                      Instant 0MB
                     </span>
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Cloud API key option for students with internet connection.
+                    Instant educational AI tutor. Zero download, zero setup required.
                   </p>
                 </button>
               </div>
             </div>
+
+            {/* If In-Browser WebLLM is selected */}
+            {provider === "in_browser" && (
+              <div className="space-y-3.5 rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-primary" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                      Direct In-Browser Model Download (WebGPU)
+                    </h3>
+                  </div>
+                  {isBrowserModelReady ? (
+                    <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Model Ready in Tab
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">Select a model to download</span>
+                  )}
+                </div>
+
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Download lightweight AI models (such as SmolLM2 or Qwen 2.5) directly into your browser storage. It runs completely client-side with full offline privacy!
+                </p>
+
+                {/* Model Cards */}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {IN_BROWSER_MODELS.map((m) => {
+                    const isSelected = browserModel === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setBrowserModel(m.id);
+                          setIsBrowserModelReady(isModelLoadedInBrowser(m.id));
+                        }}
+                        className={`cursor-pointer rounded-xl border p-3 text-left transition-all ${
+                          isSelected
+                            ? "border-primary bg-card text-foreground ring-1 ring-primary shadow-sm"
+                            : "border-border/70 bg-card/60 text-muted-foreground hover:border-border hover:text-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-xs text-foreground flex items-center gap-1.5">
+                            {m.name}
+                            {m.recommended && (
+                              <span className="rounded bg-primary/10 px-1 py-0.2 text-[9px] font-bold text-primary">
+                                Recommended
+                              </span>
+                            )}
+                          </span>
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-foreground font-semibold">
+                            {m.size}
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">{m.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Download Progress or Trigger */}
+                <div className="pt-1">
+                  {isDownloadingBrowserModel ? (
+                    <div className="space-y-2 rounded-xl bg-card p-3 border border-border">
+                      <div className="flex justify-between text-xs font-semibold text-foreground">
+                        <span className="truncate max-w-[80%] text-[11px]">{browserModelProgressText || "Downloading AI weights into browser..."}</span>
+                        <span className="text-primary">{browserModelPercent}%</span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full bg-primary transition-all duration-300"
+                          style={{ width: `${browserModelPercent}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      onClick={handleDownloadInBrowserModel}
+                      className="w-full gap-2 text-xs font-semibold"
+                    >
+                      <HardDriveDownload className="h-4 w-4" />
+                      {isBrowserModelReady ? "Re-Download / Reload In-Browser Model" : `Download ${IN_BROWSER_MODELS.find(m => m.id === browserModel)?.name} to Browser`}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* If Ollama is selected */}
             {provider === "ollama" && (
@@ -287,7 +394,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   <div className="flex items-center gap-2">
                     <Cpu className="h-4 w-4 text-primary" />
                     <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                      Ollama Configuration & Lightest Models
+                      Ollama Configuration
                     </h3>
                   </div>
                   <Button
@@ -306,196 +413,117 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                 {/* Connection Status Banner */}
                 {ollamaStatus.tested && (
                   <div
-                    className={`rounded-lg p-2.5 text-xs flex items-start gap-2 ${
+                    className={`rounded-xl p-3 text-xs flex flex-col gap-2 ${
                       ollamaStatus.connected
                         ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20"
                         : "bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20"
                     }`}
                   >
-                    {ollamaStatus.connected ? (
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500 mt-0.5" />
-                    ) : (
-                      <AlertCircle className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
-                    )}
-                    <div>
-                      <p className="font-semibold">
-                        {ollamaStatus.connected
-                          ? `Connected to Ollama in ${ollamaStatus.latencyMs}ms`
-                          : "Ollama Not Connected"}
-                      </p>
-                      <p className="text-[11px] mt-0.5 opacity-90">
-                        {ollamaStatus.connected
-                          ? `Found ${ollamaStatus.models.length} installed model(s) ready for offline study.`
-                          : ollamaStatus.error || "Ensure Ollama daemon is running locally."}
-                      </p>
+                    <div className="flex items-start gap-2">
+                      {ollamaStatus.connected ? (
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500 mt-0.5" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
+                      )}
+                      <div className="flex-1">
+                        <p className="font-semibold">
+                          {ollamaStatus.connected
+                            ? `Connected to Ollama (${ollamaStatus.latencyMs}ms)`
+                            : "Ollama Not Connected"}
+                        </p>
+                        <p className="text-[11px] mt-0.5 opacity-90 leading-relaxed">
+                          {ollamaStatus.connected
+                            ? `Found ${ollamaStatus.models.length} installed model(s) ready for offline study.`
+                            : (ollamaStatus.error || "Cannot reach Ollama. Start it with CORS enabled or switch to In-Browser AI.")}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* Anti-Repetition & Anti-Suspension Controls */}
-                <div className="rounded-xl border border-border/80 bg-background/80 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
-                      <ShieldAlert className="h-3.5 w-3.5 text-emerald-500" />
-                      <span>Anti-Repetition & Anti-Loop Safeguards</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleResetAntiRepetition}
-                      className="flex cursor-pointer items-center gap-1 text-[11px] text-primary hover:underline"
-                    >
-                      <RotateCcw className="h-3 w-3" />
-                      <span>Reset Safeguards</span>
-                    </button>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2 text-xs">
-                    <div>
-                      <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
-                        <span>Repetition Penalty (Breaks spam/loops):</span>
-                        <span className="font-bold text-foreground">{repeatPenalty}x</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="1.0"
-                        max="1.8"
-                        step="0.05"
-                        value={repeatPenalty}
-                        onChange={(e) => setRepeatPenalty(parseFloat(e.target.value))}
-                        className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer"
-                      />
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
-                        <span>Temperature (Creativity & Variety):</span>
-                        <span className="font-bold text-foreground">{temperature}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0.2"
-                        max="1.2"
-                        step="0.05"
-                        value={temperature}
-                        onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                        className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Host URL */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
-                    Ollama Host Endpoint URL
-                  </label>
+                {/* Base URL */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-foreground">Ollama Endpoint URL</label>
                   <Input
+                    type="text"
                     value={ollamaUrl}
                     onChange={(e) => setOllamaUrl(e.target.value)}
                     placeholder="http://localhost:11434"
-                    className="h-8 text-xs bg-background"
+                    className="font-mono text-xs bg-background"
                   />
                 </div>
 
-                {/* Recommended Lightest Models */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5">
-                    Recommended Lightest Free Models for Students:
+                {/* Model selection */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-foreground">
+                    Select Model
                   </label>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {RECOMMENDED_LIGHT_MODELS.map((model) => {
-                      const isSelected = selectedModel === model.id && !customModel;
+                      const isSelected = selectedModel === model.name && !customModel;
                       return (
-                        <div
-                          key={model.id}
+                        <button
+                          key={model.name}
+                          type="button"
                           onClick={() => {
-                            setSelectedModel(model.id);
+                            setSelectedModel(model.name);
                             setCustomModel("");
                           }}
-                          className={`cursor-pointer rounded-xl border p-2.5 text-xs transition-all ${
+                          className={`cursor-pointer rounded-xl border p-2.5 text-left transition-all ${
                             isSelected
-                              ? "border-primary bg-background shadow-sm ring-1 ring-primary"
-                              : "border-border/60 bg-background/50 hover:bg-background"
+                              ? "border-primary bg-card text-foreground ring-1 ring-primary"
+                              : "border-border/70 bg-card/50 text-muted-foreground hover:border-border hover:text-foreground"
                           }`}
                         >
-                          <div className="flex items-center justify-between font-semibold">
-                            <span className="text-foreground">{model.name}</span>
-                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                              {model.sizeLabel}
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-xs font-bold text-foreground">{model.name}</span>
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground font-semibold">
+                              {model.size}
                             </span>
                           </div>
-                          <p className="mt-1 text-[11px] text-muted-foreground leading-tight">
-                            {model.description}
-                          </p>
-                          <div className="mt-2 flex items-center justify-between border-t border-border/40 pt-1.5">
-                            <code className="text-[10px] text-muted-foreground truncate">{model.command}</code>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleCopyCommand(model.command);
-                              }}
-                              title="Copy install command"
-                              className="cursor-pointer rounded p-1 hover:bg-muted text-muted-foreground hover:text-foreground"
-                            >
-                              <Copy className="h-3 w-3" />
-                            </button>
-                          </div>
-                        </div>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{model.notes}</p>
+                        </button>
                       );
                     })}
                   </div>
                 </div>
 
-                {/* Custom Model Input */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
-                    Or Use Custom Model Name (if already downloaded in Ollama):
-                  </label>
-                  <Input
-                    value={customModel}
-                    onChange={(e) => {
-                      setCustomModel(e.target.value);
-                    }}
-                    placeholder="e.g. mistral, phi3, deepseek-coder:1.3b..."
-                    className="h-8 text-xs bg-background"
-                  />
-                </div>
-
                 {/* Student Quick Setup Help */}
-                <div className="rounded-lg border border-border/70 bg-card p-3 text-xs space-y-1.5">
-                  <p className="font-semibold text-foreground">💡 Quick 1-Minute Student Setup for Ollama:</p>
-                  <ol className="list-decimal pl-4 space-y-1 text-muted-foreground text-[11px]">
+                <div className="rounded-xl border border-border/70 bg-card p-3.5 text-xs space-y-2.5">
+                  <p className="font-bold text-foreground">💡 How to start Ollama with browser access (CORS):</p>
+                  <ol className="list-decimal pl-4 space-y-2 text-muted-foreground text-[11px]">
                     <li>
-                      Install free Ollama from{" "}
+                      Download and install free Ollama from{" "}
                       <a
                         href="https://ollama.com"
                         target="_blank"
                         rel="noreferrer"
-                        className="text-primary hover:underline"
+                        className="text-primary font-semibold hover:underline"
                       >
                         ollama.com
                       </a>
                     </li>
                     <li>
-                      Download the lightest model in your terminal:
-                      <div className="mt-1 flex items-center justify-between rounded bg-muted/60 px-2 py-1 font-mono text-[11px] text-foreground">
+                      Download the model:
+                      <div className="mt-1 flex items-center justify-between rounded-lg bg-muted/70 px-2.5 py-1.5 font-mono text-[11px] text-foreground">
                         <span>ollama run qwen2.5:0.5b</span>
                         <button
                           type="button"
                           onClick={() => handleCopyCommand("ollama run qwen2.5:0.5b")}
-                          className="cursor-pointer text-primary hover:underline"
+                          className="cursor-pointer font-sans text-xs font-semibold text-primary hover:underline"
                         >
                           Copy
                         </button>
                       </div>
                     </li>
                     <li>
-                      If running from a browser origin, enable web access with:
-                      <div className="mt-1 flex items-center justify-between rounded bg-muted/60 px-2 py-1 font-mono text-[11px] text-foreground">
+                      <strong>Start Ollama with CORS enabled</strong>:
+                      <div className="mt-1 flex items-center justify-between rounded-lg bg-muted/70 px-2.5 py-1.5 font-mono text-[11px] text-foreground">
                         <span>OLLAMA_ORIGINS="*" ollama serve</span>
                         <button
                           type="button"
                           onClick={() => handleCopyCommand('OLLAMA_ORIGINS="*" ollama serve')}
-                          className="cursor-pointer text-primary hover:underline"
+                          className="cursor-pointer font-sans text-xs font-semibold text-primary hover:underline"
                         >
                           Copy
                         </button>
@@ -511,35 +539,11 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-foreground space-y-2">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  <span className="font-bold">Built-in Offline Study Assistant (Ready Instantly)</span>
+                  <span className="font-bold">Built-in Instant Study Tutor</span>
                 </div>
                 <p className="text-muted-foreground leading-relaxed">
-                  Study Buddy includes a zero-overhead educational brain with multilingual topic comprehension, active recall quizzing, step-by-step math breakdowns, and structured study note templates. It operates 100% in your browser without requiring any software installation or internet connection.
+                  Study Buddy includes an educational engine with multilingual comprehension, active recall quizzing, step-by-step math breakdowns, and structured study note templates. It operates 100% in your browser without requiring any software installation or internet connection.
                 </p>
-              </div>
-            )}
-
-            {/* If Gemini is selected */}
-            {provider === "gemini" && (
-              <div className="space-y-2 rounded-xl border border-border/70 bg-card p-4 text-xs">
-                <label className="flex items-center justify-between font-semibold uppercase tracking-wider text-muted-foreground">
-                  <span>Google Gemini API Key</span>
-                  {geminiKey && (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-500">
-                      <Check className="h-3 w-3" /> Key active
-                    </span>
-                  )}
-                </label>
-                <div className="relative">
-                  <Key className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="password"
-                    placeholder="AIzaSy..."
-                    value={geminiKey}
-                    onChange={(e) => setGeminiKey(e.target.value)}
-                    className="pl-9 text-xs"
-                  />
-                </div>
               </div>
             )}
           </div>
@@ -608,10 +612,10 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               <p className="font-semibold text-foreground">📱 How 100% Offline Mode Works:</p>
               <ul className="list-disc pl-4 space-y-1 text-[11px] leading-relaxed">
                 <li>
-                  <strong className="text-foreground">Service Worker:</strong> Automatically registers in your browser to intercept network requests and deliver cached HTML, CSS, JavaScript, and fonts even in airplane mode.
+                  <strong className="text-foreground">In-Browser AI:</strong> Models like <code>SmolLM2 (135M)</code> or <code>Qwen 2.5 (0.5B)</code> download directly into your browser's WebGPU cache.
                 </li>
                 <li>
-                  <strong className="text-foreground">Offline AI Models:</strong> Pair this with Ollama (e.g. <code>qwen2.5:0.5b</code> or <code>smollm:135m</code>) or the Built-in Brain to chat and generate notes with zero internet.
+                  <strong className="text-foreground">Service Worker:</strong> Automatically registers in your browser to intercept network requests and deliver cached HTML, CSS, JavaScript, and fonts even in airplane mode.
                 </li>
                 <li>
                   <strong className="text-foreground">Local Storage:</strong> All chat sessions, past conversations, and saved notes are kept securely in your browser storage.
@@ -623,7 +627,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
 
         <DialogFooter className="flex items-center justify-between sm:justify-between pt-2">
           <div className="text-[11px] text-muted-foreground">
-            Current mode: <span className="font-semibold text-foreground capitalize">{provider.replace("_", " ")}</span>
+            Current engine: <span className="font-semibold text-foreground capitalize">{provider.replace("_", " ")}</span>
           </div>
           <div className="flex gap-2">
             <Button
