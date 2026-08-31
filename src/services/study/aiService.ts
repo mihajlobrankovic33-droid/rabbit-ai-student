@@ -10,20 +10,20 @@ import {
   getSavedBrowserModel,
 } from "./webLlmService";
 
-export type AIProvider = "in_browser" | "ollama" | "builtin_offline" | "gemini";
+export type AIProvider = "gemini" | "ollama" | "in_browser" | "builtin_offline";
 
 const AI_PROVIDER_KEY = "study_buddy_ai_provider";
 
 export function getSelectedAIProvider(): AIProvider {
   try {
     const raw = localStorage.getItem(AI_PROVIDER_KEY);
-    if (raw === "in_browser" || raw === "ollama" || raw === "builtin_offline" || raw === "gemini") {
+    if (raw === "gemini" || raw === "ollama" || raw === "in_browser" || raw === "builtin_offline") {
       return raw;
     }
   } catch (e) {
     console.warn(e);
   }
-  return "in_browser";
+  return "gemini";
 }
 
 export function setSelectedAIProvider(provider: AIProvider): void {
@@ -91,7 +91,64 @@ export async function generateChatResponse(
   const lower = clean.toLowerCase();
   const provider = getSelectedAIProvider();
 
-  // 1. In-browser AI Engine (WebLLM - downloaded right into browser)
+  // 1. If user chose Gemini Cloud AI (Primary / Deep Thinking)
+  if (provider === "gemini") {
+    try {
+      const reply = await callServerChat(clean, history, signal);
+      if (reply && reply.trim().length > 0) {
+        return reply;
+      }
+    } catch (err: unknown) {
+      if (signal?.aborted) {
+        return "*(Generation was stopped)*";
+      }
+      console.warn("Gemini cloud brain failed, falling back:", err);
+    }
+  }
+
+  // 2. If user explicitly chose Ollama local model
+  if (provider === "ollama") {
+    let ollamaError: string | null = null;
+    const ollamaConfig = getOllamaConfig();
+    try {
+      const messagesForOllama = [
+        ...history.slice(-6).map((m) => ({
+          role: m.role === "assistant" ? "assistant" : "user",
+          content: m.content,
+        })),
+        { role: "user", content: clean },
+      ];
+      const ollamaReply = await generateOllamaChat(messagesForOllama, ollamaConfig, signal);
+      if (ollamaReply && ollamaReply.trim().length > 0) {
+        return ollamaReply;
+      }
+    } catch (err: unknown) {
+      if (signal?.aborted) {
+        return "*(Generation was stopped)*";
+      }
+      ollamaError = err instanceof Error ? err.message : "Ollama connection error";
+      console.warn("Ollama call failed:", err);
+    }
+
+    // Try cloud brain to answer the user's question, and inform them of Ollama status
+    try {
+      const reply = await callServerChat(clean, history, signal);
+      if (reply && reply.trim().length > 0) {
+        if (ollamaError) {
+          return `> ⚠️ **Ollama Status:** ${ollamaError}\n> *(Answered via Cloud AI Tutor while Ollama connects)*\n\n${reply}`;
+        }
+        return reply;
+      }
+    } catch (err: unknown) {
+      console.warn("Server AI fallback after Ollama failed:", err);
+    }
+
+    if (ollamaError) {
+      return `### ⚠️ Ollama Connection Error\n\n${ollamaError}\n\n**How to start Ollama with browser access:**\n1. In your terminal run: \`OLLAMA_ORIGINS="*" ollama serve\`\n2. Download the model: \`ollama run ${ollamaConfig.selectedModel || "qwen2.5:0.5b"}\`\n3. Refresh this page or re-test connection in Settings.`;
+    }
+  }
+
+  // 3. In-browser AI Engine (WebLLM - downloaded right into browser)
   if (provider === "in_browser") {
     try {
       const modelId = getSavedBrowserModel();
@@ -111,34 +168,20 @@ export async function generateChatResponse(
         return "*(Generation was stopped)*";
       }
       console.warn("In-browser engine fallback triggered:", inBrowserErr);
-      // Fallback seamlessly to server-side AI or offline response
     }
-  }
 
-  // 2. If user explicitly chose Ollama, try Ollama
-  if (provider === "ollama") {
+    // Seamlessly answer with server AI
     try {
-      const ollamaConfig = getOllamaConfig();
-      const messagesForOllama = [
-        ...history.slice(-6).map((m) => ({
-          role: m.role === "assistant" ? "assistant" : "user",
-          content: m.content,
-        })),
-        { role: "user", content: clean },
-      ];
-      const ollamaReply = await generateOllamaChat(messagesForOllama, ollamaConfig, signal);
-      if (ollamaReply && ollamaReply.trim().length > 0) {
-        return ollamaReply;
+      const reply = await callServerChat(clean, history, signal);
+      if (reply && reply.trim().length > 0) {
+        return reply;
       }
-    } catch {
-      if (signal?.aborted) {
-        return "*(Generation was stopped)*";
-      }
-      // If Ollama fails, proceed to server-side AI seamlessly
+    } catch (err: unknown) {
+      console.warn("Server AI chat fallback triggered:", err);
     }
   }
 
-  // 3. Try Server-Side AI Brain (Gemini 3.7 Flash)
+  // 4. Default fallback: Server AI Brain
   try {
     const reply = await callServerChat(clean, history, signal);
     if (reply && reply.trim().length > 0) {
@@ -151,7 +194,7 @@ export async function generateChatResponse(
     console.warn("Server AI chat fallback triggered:", err);
   }
 
-  // 4. Fallback: Intelligent offline generator
+  // 5. Final Fallback: Intelligent offline generator
   return generateDynamicBuiltinResponse(clean, lower);
 }
 
@@ -339,16 +382,14 @@ export async function generateStudyNotes(
 
   const provider = getSelectedAIProvider();
 
-  // 1. In-browser AI Engine (WebLLM)
-  if (provider === "in_browser") {
+  // 1. Gemini Cloud AI Brain
+  if (provider === "gemini") {
     try {
-      const modelId = getSavedBrowserModel();
-      const result = await generateInBrowserStudyNotes(displayTitle, displayTopic, modelId, undefined, signal);
-      return { content: result };
-    } catch (inBrowserErr) {
+      const serverNotes = await callServerNotes(displayTitle, displayTopic, signal);
+      return { content: serverNotes };
+    } catch (err: unknown) {
       if (signal?.aborted) throw new Error("Notes generation stopped");
-      console.warn("In-browser notes generation fallback:", inBrowserErr);
-      // Fallback to server AI
+      console.warn("Gemini cloud notes failed, falling back:", err);
     }
   }
 
@@ -358,13 +399,37 @@ export async function generateStudyNotes(
       const ollamaConfig = getOllamaConfig();
       const result = await generateOllamaNotes(displayTitle, displayTopic, ollamaConfig, signal);
       return { content: result };
-    } catch {
+    } catch (ollamaErr) {
       if (signal?.aborted) throw new Error("Notes generation stopped");
-      // Fallback to server-side AI
+      console.warn("Ollama notes failed, trying cloud fallback:", ollamaErr);
+      try {
+        const serverNotes = await callServerNotes(displayTitle, displayTopic, signal);
+        return { content: serverNotes };
+      } catch {
+        // Fallback to offline notes
+      }
     }
   }
 
-  // 3. Server-side Gemini 3.7 AI Notes endpoint
+  // 3. In-browser AI Engine (WebLLM)
+  if (provider === "in_browser") {
+    try {
+      const modelId = getSavedBrowserModel();
+      const result = await generateInBrowserStudyNotes(displayTitle, displayTopic, modelId, undefined, signal);
+      return { content: result };
+    } catch (inBrowserErr) {
+      if (signal?.aborted) throw new Error("Notes generation stopped");
+      console.warn("In-browser notes generation fallback:", inBrowserErr);
+      try {
+        const serverNotes = await callServerNotes(displayTitle, displayTopic, signal);
+        return { content: serverNotes };
+      } catch {
+        // Fallback to offline notes
+      }
+    }
+  }
+
+  // 4. Server-side Gemini AI Notes endpoint (General fallback)
   try {
     const serverNotes = await callServerNotes(displayTitle, displayTopic, signal);
     return { content: serverNotes };

@@ -31,6 +31,8 @@ import {
   setSavedBrowserModel,
   getOrInitInBrowserEngine,
   isModelLoadedInBrowser,
+  checkWebGPUCapability,
+  WebGPUCapability,
 } from "@/services/study/webLlmService";
 import {
   RECOMMENDED_LIGHT_MODELS,
@@ -62,6 +64,10 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [browserModelProgressText, setBrowserModelProgressText] = useState("");
   const [browserModelPercent, setBrowserModelPercent] = useState(0);
   const [isBrowserModelReady, setIsBrowserModelReady] = useState(false);
+  const [gpuCapability, setGpuCapability] = useState<WebGPUCapability>({
+    supported: true,
+    hasShaderF16: false,
+  });
 
   // Ollama state
   const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
@@ -93,6 +99,17 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       setBrowserModel(savedModel);
       setIsBrowserModelReady(isModelLoadedInBrowser(savedModel));
 
+      checkWebGPUCapability().then((cap) => {
+        setGpuCapability(cap);
+        // If current model requires shader-f16 but browser lacks it, switch to universal model
+        const currentM = IN_BROWSER_MODELS.find((m) => m.id === savedModel);
+        if (currentM?.requiresShaderF16 && !cap.hasShaderF16) {
+          const fallback = IN_BROWSER_MODELS.find((m) => !m.requiresShaderF16)?.id || IN_BROWSER_MODELS[0].id;
+          setBrowserModel(fallback);
+          setSavedBrowserModel(fallback);
+        }
+      });
+
       const ollamaCfg = getOllamaConfig();
       setOllamaUrl(ollamaCfg.baseUrl);
       setSelectedModel(ollamaCfg.selectedModel);
@@ -101,6 +118,14 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   }, [open]);
 
   const handleDownloadInBrowserModel = async () => {
+    if (!gpuCapability.supported) {
+      toast.error(
+        gpuCapability.error || "WebGPU is not enabled in this browser. Using Gemini Cloud AI and Built-in Brain instead."
+      );
+      setProvider("gemini");
+      return;
+    }
+
     setIsDownloadingBrowserModel(true);
     setBrowserModelProgressText("Initializing WebGPU shader pipeline...");
     setBrowserModelPercent(5);
@@ -116,7 +141,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       setSavedBrowserModel(browserModel);
       toast.success("AI Model successfully downloaded into your browser cache!");
     } catch (err: unknown) {
-      console.error("WebLLM load error:", err);
       const msg = err instanceof Error ? err.message : "Failed to load model in browser.";
       toast.error(`Download notice: ${msg}. Built-in Brain will assist you automatically!`);
     } finally {
@@ -232,25 +256,25 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Choose AI Engine
               </label>
-              <div className="grid gap-2 sm:grid-cols-3">
-                {/* 1. In-Browser AI */}
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {/* 1. Gemini Cloud AI */}
                 <button
                   type="button"
-                  onClick={() => setProvider("in_browser")}
+                  onClick={() => setProvider("gemini")}
                   className={`cursor-pointer rounded-xl border p-3 text-left transition-all ${
-                    provider === "in_browser"
-                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary"
+                    provider === "gemini"
+                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary shadow-sm"
                       : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-sm text-foreground">In-Browser AI</span>
-                    <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
-                      Direct in Site
+                    <span className="font-bold text-sm text-foreground">Gemini AI</span>
+                    <span className="rounded-md bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                      Deep Thinking
                     </span>
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Download & run AI directly inside your browser cache. No terminal required!
+                    Fastest, most thoughtful AI reasoning across STEM, languages, and deep homework steps.
                   </p>
                 </button>
 
@@ -260,28 +284,49 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   onClick={() => setProvider("ollama")}
                   className={`cursor-pointer rounded-xl border p-3 text-left transition-all ${
                     provider === "ollama"
-                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary"
+                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary shadow-sm"
                       : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-sm text-foreground">Ollama Daemon</span>
+                    <span className="font-bold text-sm text-foreground">Ollama</span>
                     <span className="rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400">
-                      Terminal
+                      Local PC
                     </span>
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Connect to your local Ollama daemon running on your computer.
+                    Connect to your local Ollama instance (e.g. qwen2.5:0.5b, smollm:135m, llama3.2:1b).
                   </p>
                 </button>
 
-                {/* 3. Built-in Brain */}
+                {/* 3. In-Browser AI */}
+                <button
+                  type="button"
+                  onClick={() => setProvider("in_browser")}
+                  className={`cursor-pointer rounded-xl border p-3 text-left transition-all ${
+                    provider === "in_browser"
+                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary shadow-sm"
+                      : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-sm text-foreground">In-Browser AI</span>
+                    <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                      WebGPU Tab
+                    </span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    Download & run AI directly inside your browser cache. No terminal required!
+                  </p>
+                </button>
+
+                {/* 4. Built-in Brain */}
                 <button
                   type="button"
                   onClick={() => setProvider("builtin_offline")}
                   className={`cursor-pointer rounded-xl border p-3 text-left transition-all ${
                     provider === "builtin_offline"
-                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary"
+                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary shadow-sm"
                       : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
                   }`}
                 >
@@ -292,11 +337,27 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     </span>
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Instant educational AI tutor. Zero download, zero setup required.
+                    Instant offline knowledge engine. Zero download, zero setup required.
                   </p>
                 </button>
               </div>
             </div>
+
+            {/* If Gemini is selected */}
+            {provider === "gemini" && (
+              <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-foreground">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <span className="font-bold">Gemini Deep Thinking AI Active</span>
+                  <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                    Online & Ready
+                  </span>
+                </div>
+                <p className="text-muted-foreground leading-relaxed">
+                  Study Buddy leverages deep AI reasoning models to break down complex topics step-by-step in any language with complete mathematical derivations, code examples, analogies, and active recall practice.
+                </p>
+              </div>
+            )}
 
             {/* If In-Browser WebLLM is selected */}
             {provider === "in_browser" && (
@@ -312,19 +373,35 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                       <CheckCircle2 className="h-3.5 w-3.5" /> Model Ready in Tab
                     </span>
+                  ) : gpuCapability.supported ? (
+                    <span className="flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-blue-600 dark:text-blue-400">
+                      WebGPU Ready
+                    </span>
                   ) : (
-                    <span className="text-[11px] text-muted-foreground">Select a model to download</span>
+                    <span className="flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                      <AlertCircle className="h-3.5 w-3.5" /> WebGPU Unavailable
+                    </span>
                   )}
                 </div>
 
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Download lightweight AI models (such as SmolLM2 or Qwen 2.5) directly into your browser storage. It runs completely client-side with full offline privacy!
-                </p>
+                {!gpuCapability.supported ? (
+                  <div className="rounded-xl bg-amber-500/10 p-3 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300">
+                    <p className="font-semibold">WebGPU is not active in this browser tab.</p>
+                    <p className="mt-1 text-[11px] opacity-90">
+                      Don't worry! <strong>Built-in Brain</strong> is active and answers your questions immediately with full multilingual AI tutoring.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Download lightweight AI models (such as SmolLM2 or Qwen 2.5) directly into your browser storage. Universal models run on all standard WebGPU browsers with zero command line flags!
+                  </p>
+                )}
 
                 {/* Model Cards */}
                 <div className="grid gap-2 sm:grid-cols-2">
                   {IN_BROWSER_MODELS.map((m) => {
                     const isSelected = browserModel === m.id;
+
                     return (
                       <button
                         key={m.id}
@@ -376,11 +453,16 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   ) : (
                     <Button
                       type="button"
+                      disabled={!gpuCapability.supported}
                       onClick={handleDownloadInBrowserModel}
                       className="w-full gap-2 text-xs font-semibold"
                     >
                       <HardDriveDownload className="h-4 w-4" />
-                      {isBrowserModelReady ? "Re-Download / Reload In-Browser Model" : `Download ${IN_BROWSER_MODELS.find(m => m.id === browserModel)?.name} to Browser`}
+                      {!gpuCapability.supported
+                        ? "WebGPU Not Available (Use Gemini AI or Built-in Brain)"
+                        : isBrowserModelReady
+                        ? "Re-Download / Reload In-Browser Model"
+                        : `Download ${IN_BROWSER_MODELS.find((m) => m.id === browserModel)?.name} to Browser`}
                     </Button>
                   )}
                 </div>
@@ -455,18 +537,57 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
 
                 {/* Model selection */}
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-foreground">
-                    Select Model
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-foreground">
+                      Select Model
+                    </label>
+                    {ollamaStatus.connected && ollamaStatus.models.length > 0 && (
+                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                        ✓ {ollamaStatus.models.length} model(s) detected on machine
+                      </span>
+                    )}
+                  </div>
+
+                  {/* If models detected from live Ollama instance */}
+                  {ollamaStatus.connected && ollamaStatus.models.length > 0 && (
+                    <div className="space-y-1.5 pb-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Installed on Your Computer:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {ollamaStatus.models.map((m) => {
+                          const isSelected = selectedModel === m.name;
+                          return (
+                            <button
+                              key={m.name}
+                              type="button"
+                              onClick={() => {
+                                setSelectedModel(m.name);
+                                setCustomModel("");
+                              }}
+                              className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-mono transition-all ${
+                                isSelected
+                                  ? "bg-primary text-primary-foreground font-bold shadow-xs"
+                                  : "border border-border bg-card text-foreground hover:bg-muted"
+                              }`}
+                            >
+                              {m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid gap-2 sm:grid-cols-2">
                     {RECOMMENDED_LIGHT_MODELS.map((model) => {
-                      const isSelected = selectedModel === model.name && !customModel;
+                      const isSelected = (selectedModel === model.id || selectedModel === model.name) && !customModel;
                       return (
                         <button
-                          key={model.name}
+                          key={model.id}
                           type="button"
                           onClick={() => {
-                            setSelectedModel(model.name);
+                            setSelectedModel(model.id);
                             setCustomModel("");
                           }}
                           className={`cursor-pointer rounded-xl border p-2.5 text-left transition-all ${
@@ -478,14 +599,26 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                           <div className="flex items-center justify-between">
                             <span className="font-mono text-xs font-bold text-foreground">{model.name}</span>
                             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground font-semibold">
-                              {model.size}
+                              {model.sizeLabel}
                             </span>
                           </div>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{model.notes}</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{model.description}</p>
                         </button>
                       );
                     })}
                   </div>
+                </div>
+
+                {/* Custom Model Input */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground">Or Enter Any Custom Model Name</label>
+                  <Input
+                    type="text"
+                    value={customModel}
+                    onChange={(e) => setCustomModel(e.target.value)}
+                    placeholder="e.g. llama3:8b, mistral, deepseek-r1:7b..."
+                    className="font-mono text-xs bg-background h-8"
+                  />
                 </div>
 
                 {/* Student Quick Setup Help */}

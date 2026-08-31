@@ -205,37 +205,73 @@ export async function generateOllamaChat(
     : timeoutController.signal;
 
   try {
-    const response = await fetch(`${cleanUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: combinedSignal,
-      body: JSON.stringify({
-        model: currentConfig.selectedModel || "qwen2.5:0.5b",
-        messages: [systemMessage, ...sanitizedMessages],
-        stream: false,
-        options: {
-          temperature: currentConfig.temperature,
-          repeat_penalty: currentConfig.repeatPenalty,
-          repeat_last_n: 128,
-          presence_penalty: 0.7,
-          frequency_penalty: 0.7,
-          top_p: 0.9,
-          top_k: 40,
-          num_predict: currentConfig.maxTokens,
-        },
-      }),
-    });
+    let text = "";
+
+    // 1. Try modern /api/chat endpoint
+    try {
+      const response = await fetch(`${cleanUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: combinedSignal,
+        body: JSON.stringify({
+          model: currentConfig.selectedModel || "qwen2.5:0.5b",
+          messages: [systemMessage, ...sanitizedMessages],
+          stream: false,
+          options: {
+            temperature: currentConfig.temperature,
+            repeat_penalty: currentConfig.repeatPenalty,
+            repeat_last_n: 128,
+            presence_penalty: 0.7,
+            frequency_penalty: 0.7,
+            top_p: 0.9,
+            top_k: 40,
+            num_predict: currentConfig.maxTokens,
+          },
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        text = data?.message?.content || data?.response || "";
+      }
+    } catch {
+      // Chat endpoint failed, try generate endpoint below
+    }
+
+    // 2. Fallback to /api/generate endpoint if /api/chat wasn't successful
+    if (!text) {
+      const prompt = `${systemMessage.content}\n\n` +
+        sanitizedMessages.map(m => `${m.role === "assistant" ? "Assistant" : "Student"}: ${m.content}`).join("\n\n") +
+        "\n\nAssistant:";
+
+      const response = await fetch(`${cleanUrl}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: combinedSignal,
+        body: JSON.stringify({
+          model: currentConfig.selectedModel || "qwen2.5:0.5b",
+          prompt,
+          stream: false,
+          options: {
+            temperature: currentConfig.temperature,
+            repeat_penalty: currentConfig.repeatPenalty,
+            num_predict: currentConfig.maxTokens,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ollama HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      text = data?.response || "";
+    }
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      throw new Error(`Ollama HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    let text = data?.message?.content || data?.response;
-    if (!text || typeof text !== "string") {
-      throw new Error("Ollama returned an empty response.");
+    if (!text || typeof text !== "string" || !text.trim()) {
+      throw new Error(`Ollama returned an empty response for model "${currentConfig.selectedModel}".`);
     }
 
     text = cleanRepeatedTrailingPhrases(text);
@@ -244,6 +280,16 @@ export async function generateOllamaChat(
     clearTimeout(timeoutId);
     if (signal?.aborted) {
       throw new Error("Generation was stopped by user.");
+    }
+    const errMsg = err instanceof Error ? err.message : "Ollama connection error";
+    if (errMsg.includes("Failed to fetch") || errMsg.includes("NetworkError") || errMsg.includes("Load failed")) {
+      throw new Error(
+        `Cannot connect to Ollama at ${cleanUrl}. ` +
+        `Make sure you have started Ollama with CORS enabled:\n` +
+        `OLLAMA_ORIGINS="*" ollama serve\n` +
+        `and downloaded the model:\n` +
+        `ollama run ${currentConfig.selectedModel || "qwen2.5:0.5b"}`
+      );
     }
     throw err;
   }

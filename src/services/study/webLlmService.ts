@@ -1,8 +1,13 @@
 /**
  * In-browser WebLLM AI Service (WebGPU client-side AI)
- * Allows downloading and running models (SmolLM2, Qwen2.5, Llama-3.2) directly inside the browser.
+ * Universal, 100% flag-free WebGPU models (SmolLM2, Qwen2.5, Llama-3.2).
  */
-import { CreateMLCEngine, MLCEngine, InitProgressReport } from "@mlc-ai/web-llm";
+import {
+  CreateMLCEngine,
+  MLCEngine,
+  InitProgressReport,
+  prebuiltAppConfig,
+} from "@mlc-ai/web-llm";
 import { StudyContent } from "@/types/study";
 
 export interface InBrowserModelOption {
@@ -13,32 +18,45 @@ export interface InBrowserModelOption {
   recommended?: boolean;
 }
 
+export interface WebGPUCapability {
+  supported: boolean;
+  hasShaderF16: boolean;
+  error?: string;
+}
+
+// 100% Universal WebGPU models that run on standard browsers without shader-f16 or experimental flags
 export const IN_BROWSER_MODELS: InBrowserModelOption[] = [
   {
-    id: "SmolLM2-135M-Instruct-q0f16-MLC",
-    name: "SmolLM2 (135M)",
-    size: "~90 MB",
-    description: "Ultra-fast & ultra-lightweight. Downloads in seconds, works on almost any device.",
+    id: "SmolLM2-135M-Instruct-q0f32-MLC",
+    name: "SmolLM2 (135M) - Universal",
+    size: "~95 MB",
+    description: "Ultra-fast & universally compatible with all standard WebGPU browsers (no flags needed).",
     recommended: true,
   },
   {
-    id: "SmolLM2-360M-Instruct-q4f16_1-MLC",
-    name: "SmolLM2 (360M)",
-    size: "~200 MB",
-    description: "Great balance of speed and knowledge for rapid revision and study notes.",
-  },
-  {
-    id: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
-    name: "Qwen 2.5 (0.5B)",
-    size: "~350 MB",
-    description: "Excellent multilingual capabilities (Serbian, English, European languages, Math & Code).",
+    id: "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+    name: "Qwen 2.5 (0.5B) - Multilingual",
+    size: "~370 MB",
+    description: "Top choice for multilingual study (Serbian, English, European languages, Math & Coding).",
     recommended: true,
   },
   {
-    id: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
-    name: "Llama 3.2 (1B)",
+    id: "SmolLM2-360M-Instruct-q4f32_1-MLC",
+    name: "SmolLM2 (360M) - Universal",
+    size: "~210 MB",
+    description: "Great balance of reasoning and lightweight memory footprint.",
+  },
+  {
+    id: "Llama-3.2-1B-Instruct-q4f32_1-MLC",
+    name: "Llama 3.2 (1B) - Universal",
     size: "~880 MB",
-    description: "Deep reasoning and extensive academic depth (Meta Llama 3.2).",
+    description: "Meta Llama 3.2 running completely in-browser without server requests.",
+  },
+  {
+    id: "Qwen2.5-Coder-0.5B-Instruct-q4f32_1-MLC",
+    name: "Qwen 2.5 Coder (0.5B) - Universal",
+    size: "~370 MB",
+    description: "Specialized for programming, algorithms, and STEM problem solving.",
   },
 ];
 
@@ -48,38 +66,85 @@ let isInitializing = false;
 
 const BROWSER_MODEL_KEY = "study_buddy_in_browser_model";
 
+export async function checkWebGPUCapability(): Promise<WebGPUCapability> {
+  if (typeof navigator === "undefined" || !navigator.gpu) {
+    return {
+      supported: false,
+      hasShaderF16: false,
+      error: "WebGPU is not enabled in this browser. Built-in Brain and Cloud AI are ready.",
+    };
+  }
+
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) {
+      return {
+        supported: false,
+        hasShaderF16: false,
+        error: "No compatible GPU adapter found for WebGPU.",
+      };
+    }
+    const hasShaderF16 = adapter.features.has("shader-f16");
+    return {
+      supported: true,
+      hasShaderF16,
+    };
+  } catch (err: unknown) {
+    return {
+      supported: false,
+      hasShaderF16: false,
+      error: err instanceof Error ? err.message : "Failed to query WebGPU adapter",
+    };
+  }
+}
+
 export function getSavedBrowserModel(): string {
   try {
-    return localStorage.getItem(BROWSER_MODEL_KEY) || IN_BROWSER_MODELS[0].id;
+    const saved = localStorage.getItem(BROWSER_MODEL_KEY);
+    if (saved && IN_BROWSER_MODELS.some((m) => m.id === saved)) {
+      return saved;
+    }
   } catch {
-    return IN_BROWSER_MODELS[0].id;
+    // ignore
   }
+  return IN_BROWSER_MODELS[0].id;
 }
 
 export function setSavedBrowserModel(modelId: string) {
   try {
-    localStorage.setItem(BROWSER_MODEL_KEY, modelId);
+    // Sanitize to only valid universal models
+    const valid = IN_BROWSER_MODELS.some((m) => m.id === modelId)
+      ? modelId
+      : IN_BROWSER_MODELS[0].id;
+    localStorage.setItem(BROWSER_MODEL_KEY, valid);
   } catch {
     // ignore
   }
-}
-
-export function isWebGPUSupported(): boolean {
-  return typeof navigator !== "undefined" && "gpu" in navigator;
 }
 
 export async function getOrInitInBrowserEngine(
   modelId?: string,
   onProgress?: (report: InitProgressReport) => void
 ): Promise<MLCEngine> {
-  const targetModel = modelId || getSavedBrowserModel();
+  let targetModel = modelId || getSavedBrowserModel();
+
+  // Validate target model is in prebuiltAppConfig and universal
+  if (!IN_BROWSER_MODELS.some((m) => m.id === targetModel)) {
+    targetModel = IN_BROWSER_MODELS[0].id;
+  }
+
+  const gpuInfo = await checkWebGPUCapability();
+  if (!gpuInfo.supported) {
+    throw new Error(
+      gpuInfo.error || "WebGPU is not available in this browser environment."
+    );
+  }
 
   if (engineInstance && currentLoadedModelId === targetModel) {
     return engineInstance;
   }
 
   if (isInitializing) {
-    // Wait for in-progress load
     while (isInitializing) {
       await new Promise((res) => setTimeout(res, 200));
     }
@@ -91,6 +156,7 @@ export async function getOrInitInBrowserEngine(
   isInitializing = true;
   try {
     const engine = await CreateMLCEngine(targetModel, {
+      appConfig: prebuiltAppConfig,
       initProgressCallback: (report) => {
         if (onProgress) onProgress(report);
       },
