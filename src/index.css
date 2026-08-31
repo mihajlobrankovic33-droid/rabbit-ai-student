@@ -120,13 +120,36 @@
 @layer base {
   * {
     border-color: hsl(var(--border));
+    -webkit-tap-highlight-color: transparent;
+  }
+  html, body {
+    height: 100%;
+    overscroll-behavior-y: none;
   }
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
     font-family: 'Inter', sans-serif;
+    touch-action: manipulation;
   }
+}
+
+/* Mobile & Safe Area Utilities */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar,
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Markdown styling inside chat & notes */

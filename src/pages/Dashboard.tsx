@@ -366,7 +366,7 @@ export default function Dashboard() {
       </header>
 
       {/* Main Workspace Layout */}
-      <main className="flex-1 w-full max-w-5xl mx-auto p-3 sm:p-5 md:p-6">
+      <main className="flex-1 w-full max-w-5xl mx-auto p-3 sm:p-5 md:p-6 pb-24 md:pb-8">
         {/* View 1: Focused AI Chat Tutor */}
         {activeView === "chat" && (
           <div className="h-full">
@@ -384,7 +384,7 @@ export default function Dashboard() {
         {activeView === "notes" && (
           <div className="grid gap-6 lg:grid-cols-12 animate-in fade-in duration-300">
             <div className="space-y-5 lg:col-span-5">
-              <section className="rounded-3xl border border-border/80 bg-card p-6 shadow-md">
+              <section className="rounded-3xl border border-border/80 bg-card p-4 sm:p-6 shadow-md">
                 <div className="mb-4 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-primary" />
@@ -407,7 +407,7 @@ export default function Dashboard() {
             </div>
 
             <div className="lg:col-span-7">
-              <section className="min-h-[580px] rounded-3xl border border-border/80 bg-card p-6 shadow-md">
+              <section className="min-h-[420px] sm:min-h-[580px] rounded-3xl border border-border/80 bg-card p-4 sm:p-6 shadow-md">
                 <GeneratedContent
                   content={currentContent}
                   isGenerating={isGenerating}
@@ -426,10 +426,10 @@ export default function Dashboard() {
 
         {/* View 4: Full Library & Revision */}
         {activeView === "library" && (
-          <div className="rounded-3xl border border-border/80 bg-card p-6 shadow-md space-y-5 animate-in fade-in duration-300">
-            <div className="flex items-center justify-between border-b border-border/70 pb-4">
+          <div className="rounded-3xl border border-border/80 bg-card p-4 sm:p-6 shadow-md space-y-5 animate-in fade-in duration-300">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/70 pb-4">
               <div>
-                <h2 className="text-xl font-extrabold text-foreground">{t("libraryTab")}</h2>
+                <h2 className="text-lg sm:text-xl font-extrabold text-foreground">{t("libraryTab")}</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Sačuvane lekcije i beleške dostupne 100% offline u tvom pretraživaču.
                 </p>
@@ -437,7 +437,7 @@ export default function Dashboard() {
               <Button
                 type="button"
                 onClick={() => setActiveView("notes")}
-                className="gap-2 rounded-xl text-xs font-bold shadow-xs"
+                className="gap-2 rounded-xl text-xs font-bold shadow-xs shrink-0 self-start sm:self-auto"
               >
                 <Plus className="h-4 w-4" />
                 Nova Beleška
@@ -445,9 +445,9 @@ export default function Dashboard() {
             </div>
 
             {notes.length === 0 ? (
-              <div className="py-16 text-center">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-primary/10 text-primary mb-4">
-                  <BookOpen className="h-8 w-8" />
+              <div className="py-12 sm:py-16 text-center">
+                <div className="mx-auto flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-3xl bg-primary/10 text-primary mb-4">
+                  <BookOpen className="h-7 w-7 sm:h-8 sm:w-8" />
                 </div>
                 <h3 className="text-base font-bold text-foreground">Tvoja biblioteka je još uvek prazna</h3>
                 <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
@@ -455,7 +455,7 @@ export default function Dashboard() {
                 </p>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {notes.map((note) => (
                   <div
                     key={note.id}
@@ -496,6 +496,79 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* Mobile Floating Bottom Navigation Bar (Visible only on mobile/tablet) */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/80 bg-background/95 backdrop-blur-lg pb-safe md:hidden shadow-lg">
+        <div className="flex h-16 items-center justify-around px-2">
+          <button
+            type="button"
+            onClick={() => setActiveView("chat")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
+              activeView === "chat"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground font-medium"
+            }`}
+          >
+            <MessageSquare className={`h-5 w-5 ${activeView === "chat" ? "scale-110" : ""}`} />
+            <span className="text-[10px] mt-1">Chat</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveView("notes")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
+              activeView === "notes"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground font-medium"
+            }`}
+          >
+            <GraduationCap className={`h-5 w-5 ${activeView === "notes" ? "scale-110" : ""}`} />
+            <span className="text-[10px] mt-1">Studio</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveView("market")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
+              activeView === "market"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground font-medium"
+            }`}
+          >
+            <ShoppingBag className={`h-5 w-5 ${activeView === "market" ? "scale-110" : ""}`} />
+            <span className="text-[10px] mt-1">Market</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveView("library")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
+              activeView === "library"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground font-medium"
+            }`}
+          >
+            <BookOpen className={`h-5 w-5 ${activeView === "library" ? "scale-110" : ""}`} />
+            <span className="text-[10px] mt-1">Biblioteka</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setHamburgerOpen(true)}
+            className="flex flex-col items-center justify-center flex-1 py-1 text-center text-muted-foreground hover:text-foreground transition-colors min-h-[44px] relative"
+          >
+            <div className="relative">
+              <Menu className="h-5 w-5" />
+              {sessions.length > 0 && (
+                <span className="absolute -top-1 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
+                  {sessions.length}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] mt-1 font-medium">Meni</span>
+          </button>
+        </div>
+      </nav>
 
       {/* Hamburger Slide-Over Drawer */}
       <HamburgerMenu

@@ -211,17 +211,17 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
   };
 
   return (
-    <div className="flex h-[calc(100vh-8.5rem)] flex-col rounded-3xl border border-border/80 bg-card/95 shadow-xl backdrop-blur-sm overflow-hidden">
+    <div className="flex h-[calc(100dvh-9.5rem)] md:h-[calc(100vh-8.5rem)] flex-col rounded-3xl border border-border/80 bg-card/95 shadow-xl backdrop-blur-sm overflow-hidden">
       {/* Top Header Bar */}
-      <div className="flex items-center justify-between border-b border-border/70 bg-muted/25 px-4 sm:px-6 py-2.5 text-xs">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 via-primary/10 to-transparent text-primary shadow-xs">
-            <span className="text-base">🐰</span>
+      <div className="flex items-center justify-between border-b border-border/70 bg-muted/25 px-3 sm:px-6 py-2 sm:py-2.5 text-xs">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 via-primary/10 to-transparent text-primary shadow-xs">
+            <span className="text-sm sm:text-base">🐰</span>
           </div>
 
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-extrabold text-foreground text-sm tracking-tight">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <span className="font-extrabold text-foreground text-xs sm:text-sm tracking-tight truncate">
                 {t("chatTab")}
               </span>
 
@@ -230,25 +230,25 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
                 <button
                   type="button"
                   onClick={onOpenSettings}
-                  className="flex cursor-pointer items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-foreground transition-all hover:bg-primary/20 hover:scale-102"
+                  className="flex cursor-pointer items-center gap-1 sm:gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2 sm:px-2.5 py-0.5 text-[10px] sm:text-[11px] font-bold text-foreground transition-all hover:bg-primary/20 hover:scale-102"
                   title="Promeni AI Model ili Podešavanja"
                 >
                   {currentProvider === "gemini" && (
                     <>
                       <Sparkles className="h-3 w-3 text-primary animate-pulse" />
-                      <span>Gemini Thinking</span>
+                      <span className="truncate max-w-[90px] sm:max-w-none">Gemini Thinking</span>
                     </>
                   )}
                   {currentProvider === "ollama" && (
                     <>
                       <Cpu className="h-3 w-3 text-blue-500" />
-                      <span className="font-mono">Ollama: {ollamaConfig.selectedModel}</span>
+                      <span className="font-mono truncate max-w-[90px] sm:max-w-none">{ollamaConfig.selectedModel}</span>
                     </>
                   )}
                   {currentProvider === "in_browser" && (
                     <>
                       <Zap className="h-3 w-3 text-emerald-500" />
-                      <span>{browserModelName}</span>
+                      <span className="truncate max-w-[90px] sm:max-w-none">{browserModelName}</span>
                     </>
                   )}
                   {currentProvider === "builtin_offline" && (
@@ -257,7 +257,7 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
                       <span>Built-in Brain</span>
                     </>
                   )}
-                  <Settings2 className="h-3 w-3 text-muted-foreground ml-0.5" />
+                  <Settings2 className="h-3 w-3 text-muted-foreground ml-0.5 hidden sm:inline" />
                 </button>
               )}
 
@@ -267,29 +267,29 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
                 <span>{currentLangInfo?.name}</span>
               </span>
             </div>
-            <span className="text-muted-foreground text-[10px] hidden sm:inline">
+            <span className="text-muted-foreground text-[10px] hidden md:inline">
               {t("appSubtitle")} • 100% Offline Ready
             </span>
           </div>
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           {isLoading && (
             <button
               type="button"
               onClick={cancelGeneration}
-              className="flex cursor-pointer items-center gap-1.5 rounded-xl bg-destructive/15 px-3 py-1.5 text-xs font-bold text-destructive transition-all hover:bg-destructive/25 animate-pulse"
+              className="flex cursor-pointer items-center gap-1 sm:gap-1.5 rounded-xl bg-destructive/15 px-2 sm:px-3 py-1.5 text-xs font-bold text-destructive transition-all hover:bg-destructive/25 animate-pulse"
             >
               <Square className="h-3 w-3 fill-current" />
-              <span>{t("stopGenerating")}</span>
+              <span className="hidden sm:inline">{t("stopGenerating")}</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={handleExportChat}
-            className="flex cursor-pointer items-center gap-1 rounded-xl border border-border/70 bg-background px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
+            className="flex cursor-pointer items-center gap-1 rounded-xl border border-border/70 bg-background px-2 sm:px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
             title="Preuzmi transkript razgovora (.md)"
           >
             <Download className="h-3.5 w-3.5" />
@@ -299,7 +299,7 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
           <button
             type="button"
             onClick={handleClearChat}
-            className="flex cursor-pointer items-center gap-1 rounded-xl border border-border/70 bg-background px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive"
+            className="flex cursor-pointer items-center gap-1 rounded-xl border border-border/70 bg-background px-2 sm:px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive"
             title="Isprazni i očisti razgovor"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -310,9 +310,9 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
 
       {/* Suggested Starter Chips */}
       {messages.length <= 2 && (
-        <div className="border-b border-border/40 bg-muted/15 px-4 sm:px-6 py-2.5 overflow-x-auto no-scrollbar">
-          <div className="flex items-center gap-2 min-w-max">
-            <span className="flex items-center gap-1 text-[11px] font-bold text-primary">
+        <div className="border-b border-border/40 bg-muted/15 px-3 sm:px-6 py-2 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-max">
+            <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-primary">
               <Zap className="h-3.5 w-3.5 text-amber-500" />
               {t("quickQuestions")}:
             </span>
@@ -321,7 +321,7 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
                 key={p.label}
                 type="button"
                 onClick={() => handleSend(p.text)}
-                className="cursor-pointer rounded-full border border-border/80 bg-card px-3 py-1 text-[11px] font-medium text-foreground/90 transition-all hover:border-primary/50 hover:bg-primary/10 hover:text-primary shadow-2xs hover:scale-102"
+                className="cursor-pointer rounded-full border border-border/80 bg-card px-2.5 sm:px-3 py-1 text-[10px] sm:text-[11px] font-medium text-foreground/90 transition-all hover:border-primary/50 hover:bg-primary/10 hover:text-primary shadow-2xs hover:scale-102"
               >
                 {p.label}
               </button>
@@ -331,32 +331,32 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
       )}
 
       {/* Message Stream */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4.5">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4">
         {messages.map((msg) => {
           const isUser = msg.role === "user";
           return (
             <div
               key={msg.id}
-              className={`flex items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}
+              className={`flex items-start gap-2 sm:gap-3 ${isUser ? "justify-end" : "justify-start"}`}
             >
               {!isUser && (
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-purple-600 to-indigo-600 text-white text-sm font-bold shadow-sm">
+                <div className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-purple-600 to-indigo-600 text-white text-xs sm:text-sm font-bold shadow-sm mt-0.5">
                   🐰
                 </div>
               )}
 
-              <div className="group relative max-w-[88%] sm:max-w-[80%]">
+              <div className="group relative max-w-[92%] sm:max-w-[85%] md:max-w-[80%]">
                 <div
-                  className={`rounded-3xl px-4.5 py-3.5 text-sm leading-relaxed shadow-xs transition-all ${
+                  className={`rounded-3xl px-3.5 sm:px-4.5 py-3 sm:py-3.5 text-xs sm:text-sm leading-relaxed shadow-xs transition-all ${
                     isUser
                       ? "rounded-br-xs bg-primary font-medium text-primary-foreground shadow-sm shadow-primary/20"
                       : "rounded-bl-xs border border-border/80 bg-muted/40 text-foreground"
                   }`}
                 >
                   {isUser ? (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                   ) : (
-                    <div className="markdown-chat-content font-normal text-[13.5px]">
+                    <div className="markdown-chat-content font-normal text-[13px] sm:text-[13.5px] break-words">
                       <Markdown>{msg.content}</Markdown>
                     </div>
                   )}
@@ -364,11 +364,11 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
 
                 {/* Assistant Message Tool Footer */}
                 {!isUser && (
-                  <div className="mt-1.5 flex flex-wrap items-center gap-3 px-2 text-[11px] text-muted-foreground opacity-90 transition-opacity">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2.5 sm:gap-3 px-1 sm:px-2 text-[10px] sm:text-[11px] text-muted-foreground opacity-90 transition-opacity">
                     <button
                       type="button"
                       onClick={() => handleCopyMessage(msg.id, msg.content)}
-                      className="flex cursor-pointer items-center gap-1 hover:text-foreground font-medium transition-colors"
+                      className="flex cursor-pointer items-center gap-1 hover:text-foreground font-medium transition-colors min-h-[30px]"
                     >
                       {copiedId === msg.id ? (
                         <>
@@ -386,12 +386,12 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
                     <button
                       type="button"
                       onClick={() => handleSaveAsNote(msg)}
-                      className="flex cursor-pointer items-center gap-1 hover:text-primary font-medium transition-colors"
+                      className="flex cursor-pointer items-center gap-1 hover:text-primary font-medium transition-colors min-h-[30px]"
                     >
                       {savedNoteId === msg.id ? (
                         <>
                           <Check className="h-3 w-3 text-emerald-500" />
-                          <span className="text-emerald-500 font-bold">Sačuvano u Beleške!</span>
+                          <span className="text-emerald-500 font-bold">Sačuvano!</span>
                         </>
                       ) : (
                         <>
@@ -406,7 +406,7 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
                       onClick={() =>
                         handleSend(`Možeš li mi ovo objasniti jednostavnije sa slikovitom analogijom?`)
                       }
-                      className="flex cursor-pointer items-center gap-1 hover:text-amber-500 font-medium transition-colors"
+                      className="flex cursor-pointer items-center gap-1 hover:text-amber-500 font-medium transition-colors min-h-[30px]"
                     >
                       <Lightbulb className="h-3 w-3 text-amber-500" />
                       <span>Pojednostavi</span>
@@ -416,8 +416,8 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
               </div>
 
               {isUser && (
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-muted text-muted-foreground border border-border/60">
-                  <User className="h-4 w-4" />
+                <div className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-2xl bg-muted text-muted-foreground border border-border/60 mt-0.5">
+                  <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
               )}
             </div>
@@ -425,17 +425,17 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
         })}
 
         {isLoading && (
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-purple-600 to-indigo-600 text-white text-sm font-bold animate-pulse">
+          <div className="flex items-start gap-2 sm:gap-3">
+            <div className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-purple-600 to-indigo-600 text-white text-xs sm:text-sm font-bold animate-pulse">
               🐰
             </div>
-            <div className="flex items-center gap-3 rounded-3xl rounded-bl-xs border border-border/80 bg-muted/40 px-4 py-3 text-xs text-muted-foreground shadow-xs">
+            <div className="flex items-center gap-2 sm:gap-3 rounded-3xl rounded-bl-xs border border-border/80 bg-muted/40 px-3 sm:px-4 py-2.5 sm:py-3 text-xs text-muted-foreground shadow-xs">
               <Loader2 className="h-4 w-4 animate-spin text-primary" />
               <span className="font-medium">{t("synthesizing")}</span>
               <button
                 type="button"
                 onClick={cancelGeneration}
-                className="cursor-pointer ml-2 font-bold text-destructive hover:underline"
+                className="cursor-pointer ml-1 sm:ml-2 font-bold text-destructive hover:underline"
               >
                 {t("stopGenerating")}
               </button>
