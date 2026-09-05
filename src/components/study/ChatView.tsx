@@ -3,7 +3,6 @@ import type { ChatMessage, Note } from "@/types/study";
 import { Button } from "@/components/ui/button";
 import { useStudyAI } from "@/hooks/use-study-ai";
 import { getSelectedAIProvider } from "@/services/study/aiService";
-import { getOllamaConfig } from "@/services/study/ollamaService";
 import { getSavedBrowserModel, IN_BROWSER_MODELS } from "@/services/study/webLlmService";
 import { useI18n, SUPPORTED_LANGUAGES } from "@/services/study/i18n";
 import { saveNote } from "@/services/study/notesService";
@@ -13,7 +12,6 @@ import {
   BookMarked,
   Check,
   Copy,
-  Cpu,
   Download,
   Lightbulb,
   Loader2,
@@ -78,8 +76,18 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const currentProvider = getSelectedAIProvider();
-  const ollamaConfig = getOllamaConfig();
+  const [currentProvider, setCurrentProvider] = useState(getSelectedAIProvider());
+
+  useEffect(() => {
+    const handleProviderChange = () => {
+      setCurrentProvider(getSelectedAIProvider());
+    };
+    window.addEventListener("study_buddy_provider_changed", handleProviderChange);
+    return () => {
+      window.removeEventListener("study_buddy_provider_changed", handleProviderChange);
+    };
+  }, []);
+
   const savedBrowserModel = getSavedBrowserModel();
   const browserModelName = IN_BROWSER_MODELS.find((m) => m.id === savedBrowserModel)?.name || "WebGPU";
   const currentLangInfo = SUPPORTED_LANGUAGES.find((l) => l.code === lang);
@@ -237,12 +245,6 @@ export function ChatView({ initialMessages = [], onSaveSession, onOpenSettings }
                     <>
                       <Sparkles className="h-3 w-3 text-primary animate-pulse" />
                       <span className="truncate max-w-[90px] sm:max-w-none">Gemini Thinking</span>
-                    </>
-                  )}
-                  {currentProvider === "ollama" && (
-                    <>
-                      <Cpu className="h-3 w-3 text-blue-500" />
-                      <span className="font-mono truncate max-w-[90px] sm:max-w-none">{ollamaConfig.selectedModel}</span>
                     </>
                   )}
                   {currentProvider === "in_browser" && (

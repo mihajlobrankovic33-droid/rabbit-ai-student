@@ -37,11 +37,8 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip caching for Ollama local requests and Gemini API requests so live local AI works without stale cache
+  // Skip caching for Gemini API requests so live AI works without stale cache
   if (
-    url.port === "11434" ||
-    url.hostname === "localhost" && url.port === "11434" ||
-    url.hostname === "127.0.0.1" && url.port === "11434" ||
     url.hostname.includes("generativelanguage.googleapis.com") ||
     request.method !== "GET"
   ) {

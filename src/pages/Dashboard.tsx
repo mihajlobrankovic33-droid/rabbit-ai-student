@@ -6,6 +6,7 @@ import { MarketView } from "@/components/study/MarketView";
 import { RabbitLogo } from "@/components/study/RabbitLogo";
 import { SettingsModal } from "@/components/study/SettingsModal";
 import { HamburgerMenu } from "@/components/study/HamburgerMenu";
+import { UserProfileModal } from "@/components/study/UserProfileModal";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useStudyAI } from "@/hooks/use-study-ai";
@@ -19,7 +20,6 @@ import {
   saveNote,
 } from "@/services/study/notesService";
 import { getSelectedAIProvider } from "@/services/study/aiService";
-import { getOllamaConfig } from "@/services/study/ollamaService";
 import type { ChatMessage, ChatSession, Note, StudyContent } from "@/types/study";
 import {
   BookOpen,
@@ -51,6 +51,7 @@ export default function Dashboard() {
   const [activeView, setActiveView] = useState<"chat" | "notes" | "market" | "library">("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   // Pomodoro Focus Timer State
   const [timerSeconds, setTimerSeconds] = useState(25 * 60);
@@ -81,19 +82,26 @@ export default function Dashboard() {
   useEffect(() => {
     setNotes(getNotes(currentUserId));
     setSessions(getChatSessions(currentUserId));
-    const prov = getSelectedAIProvider();
-    const ollama = getOllamaConfig();
-    setProviderInfo({
-      provider: prov,
-      model:
-        prov === "ollama"
-          ? `Ollama (${ollama.selectedModel})`
-          : prov === "gemini"
-          ? "Gemini Flash Thinking"
-          : prov === "in_browser"
-          ? "In-Browser WebGPU"
-          : "Built-in Brain",
-    });
+
+    const updateProvider = () => {
+      const prov = getSelectedAIProvider();
+      setProviderInfo({
+        provider: prov,
+        model:
+          prov === "gemini"
+            ? "Gemini Flash Thinking"
+            : prov === "in_browser"
+            ? "In-Browser WebGPU"
+            : "Built-in Brain",
+      });
+    };
+
+    updateProvider();
+
+    window.addEventListener("study_buddy_provider_changed", updateProvider);
+    return () => {
+      window.removeEventListener("study_buddy_provider_changed", updateProvider);
+    };
   }, [currentUserId, settingsOpen]);
 
   // Pomodoro Timer Tick Effect
@@ -141,8 +149,27 @@ export default function Dashboard() {
       setCurrentTopic(topic);
 
       try {
-        const content = await generateNotes(title, topic);
-        setCurrentContent(content);
+        const raw = await generateNotes(title, topic);
+        const rawObj = raw as unknown as Record<string, unknown>;
+        const inner = (
+          rawObj.content && typeof rawObj.content === "object"
+            ? rawObj.content
+            : rawObj
+        ) as Record<string, unknown>;
+
+        const safeKeyPoints = Array.isArray(inner.keyPoints)
+          ? (inner.keyPoints as unknown[]).map(String)
+          : typeof inner.keyPoints === "string"
+          ? [inner.keyPoints]
+          : ["Ključni koncepti i definicije", "Analiza korak po korak", "Praktična primena i saveti"];
+
+        const normalized: StudyContent = {
+          title: typeof inner.title === "string" ? inner.title : (title || "Study Notes"),
+          keyPoints: safeKeyPoints,
+          summary: typeof inner.summary === "string" ? inner.summary : (topic || title),
+          fullNotes: typeof inner.fullNotes === "string" ? inner.fullNotes : "",
+        };
+        setCurrentContent(normalized);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Neuspešno generisanje";
         toast.error(msg);
@@ -177,7 +204,26 @@ export default function Dashboard() {
     setActiveNoteId(note.id);
     setCurrentTitle(note.title);
     setCurrentTopic(note.topic);
-    setCurrentContent(note.content);
+    const contentObj = note.content as unknown as Record<string, unknown>;
+    const inner = (
+      contentObj && typeof contentObj.content === "object"
+        ? contentObj.content
+        : contentObj
+    ) as Record<string, unknown>;
+
+    const safeKeyPoints = Array.isArray(inner?.keyPoints)
+      ? (inner.keyPoints as unknown[]).map(String)
+      : typeof inner?.keyPoints === "string"
+      ? [inner.keyPoints]
+      : [];
+
+    const normalized: StudyContent = {
+      title: typeof inner?.title === "string" ? inner.title : (note.title || "Beleške"),
+      keyPoints: safeKeyPoints,
+      summary: typeof inner?.summary === "string" ? inner.summary : "",
+      fullNotes: typeof inner?.fullNotes === "string" ? inner.fullNotes : "",
+    };
+    setCurrentContent(normalized);
     setIsSaved(true);
     setActiveView("notes");
   }, []);
@@ -315,26 +361,57 @@ export default function Dashboard() {
             {/* Left Side: User Account Badge */}
             <button
               type="button"
-              onClick={() => setHamburgerOpen(true)}
-              title="Korisnički profil i meni"
-              className="hidden lg:flex cursor-pointer items-center gap-2.5 rounded-2xl border border-border/70 bg-card/70 px-3 py-1.5 text-left transition-all hover:border-primary/40 hover:bg-muted/60 shadow-2xs"
+              onClick={() => setProfileOpen(true)}
+              title="Klikni da promeniš ime ili profilnu sliku"
+              className="hidden lg:flex cursor-pointer items-center gap-2.5 rounded-2xl border border-border/70 bg-card/70 px-3 py-1.5 text-left transition-all hover:border-primary/50 hover:bg-primary/5 shadow-2xs group"
             >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-xs font-extrabold text-primary">
-                {initials || "S"}
-              </span>
+              {user?.avatar && !user.avatar.startsWith("data:") && user.avatar.length <= 4 ? (
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-sm ring-1 ring-primary/30">
+                  {user.avatar}
+                </span>
+              ) : user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={displayName}
+                  className="h-7 w-7 shrink-0 rounded-xl object-cover ring-1 ring-primary/30"
+                />
+              ) : (
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-xs font-extrabold text-primary">
+                  {initials || "S"}
+                </span>
+              )}
               <div className="min-w-0">
-                <p className="truncate text-xs font-bold text-foreground leading-tight max-w-[120px]">
+                <p className="truncate text-xs font-bold text-foreground leading-tight max-w-[120px] group-hover:text-primary transition-colors">
                   {displayName}
                 </p>
                 <p className="truncate text-[10px] text-muted-foreground flex items-center gap-1 leading-tight">
-                  <Flame className="h-2.5 w-2.5 text-amber-500" /> {t("activeStudent")} • {currentLangInfo?.flag}
+                  <Flame className="h-2.5 w-2.5 text-amber-500" /> {t("activeStudent")} • {currentLangInfo?.flag || "🇷🇸"}
                 </p>
               </div>
             </button>
           </div>
 
-          {/* Right Side Controls: AI Model Engine Status + Hamburger Menu Button */}
+          {/* Right Side Controls: Mobile Profile Avatar, AI Model Engine Status + Hamburger Menu Button */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Mobile Profile Trigger Avatar */}
+            <button
+              type="button"
+              onClick={() => setProfileOpen(true)}
+              title="Moj Profil (Ime & Slika)"
+              className="flex lg:hidden cursor-pointer items-center justify-center h-8 w-8 rounded-xl border border-border/70 bg-card transition-all hover:border-primary/50 hover:bg-primary/10"
+            >
+              {user?.avatar && !user.avatar.startsWith("data:") && user.avatar.length <= 4 ? (
+                <span className="text-sm">{user.avatar}</span>
+              ) : user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={displayName}
+                  className="h-7 w-7 rounded-lg object-cover"
+                />
+              ) : (
+                <span className="text-xs font-bold text-primary">{initials || "S"}</span>
+              )}
+            </button>
             {/* AI Model indicator */}
             <div
               onClick={() => setSettingsOpen(true)}
@@ -464,7 +541,7 @@ export default function Dashboard() {
                   >
                     <div className="flex items-center justify-between mb-2">
                       <span className="rounded-lg bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                        {note.content.keyPoints.length} Tačaka
+                        {Array.isArray(note.content?.keyPoints) ? note.content.keyPoints.length : 0} Tačaka
                       </span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-[10px] text-muted-foreground">
@@ -487,7 +564,7 @@ export default function Dashboard() {
                       {note.title}
                     </h4>
                     <p className="text-xs text-muted-foreground line-clamp-2 mt-1 leading-relaxed">
-                      {note.content.summary}
+                      {note.content?.summary || ""}
                     </p>
                   </div>
                 ))}
@@ -575,6 +652,7 @@ export default function Dashboard() {
         open={hamburgerOpen}
         onClose={() => setHamburgerOpen(false)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenProfile={() => setProfileOpen(true)}
         sessions={sessions}
         activeSessionId={activeSessionId}
         onSelectSession={handleSelectSession}
@@ -595,6 +673,12 @@ export default function Dashboard() {
 
       {/* Detailed AI Settings Modal */}
       <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      {/* User Profile & Author Name Edit Modal */}
+      <UserProfileModal
+        open={profileOpen}
+        onOpenChange={setProfileOpen}
+      />
     </div>
   );
 }

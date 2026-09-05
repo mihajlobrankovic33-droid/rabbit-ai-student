@@ -90,6 +90,49 @@ export function MarketView({ onOpenNotesStudio }: MarketViewProps) {
     fetchNotes();
   }, [fetchNotes]);
 
+  // Keep formAuthor in sync with user profile
+  useEffect(() => {
+    if (user?.name) {
+      setFormAuthor(user.name);
+    }
+  }, [user?.name]);
+
+  // Listen for real-time profile updates & market notes updates
+  useEffect(() => {
+    const handleProfileUpdate = (e: Event) => {
+      const customEvt = e as CustomEvent<{ id?: string; name?: string; avatar?: string }>;
+      const updatedUser = customEvt.detail;
+      if (updatedUser && updatedUser.name) {
+        setNotes((prev) =>
+          prev.map((n) => {
+            if (n.authorId === (updatedUser.id || user?.id)) {
+              return {
+                ...n,
+                authorName: updatedUser.name || n.authorName,
+                authorAvatar: updatedUser.avatar !== undefined ? updatedUser.avatar : n.authorAvatar,
+              };
+            }
+            return n;
+          })
+        );
+      } else {
+        fetchNotes();
+      }
+    };
+
+    const handleMarketUpdated = () => {
+      fetchNotes();
+    };
+
+    window.addEventListener("study_buddy_profile_updated", handleProfileUpdate);
+    window.addEventListener("market-notes-updated", handleMarketUpdated);
+
+    return () => {
+      window.removeEventListener("study_buddy_profile_updated", handleProfileUpdate);
+      window.removeEventListener("market-notes-updated", handleMarketUpdated);
+    };
+  }, [fetchNotes, user?.id]);
+
   // Handle PDF file selection & instant parsing (supports 300+ pages)
   const handlePdfSelected = async (file: File) => {
     if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
@@ -156,7 +199,8 @@ export function MarketView({ onOpenNotesStudio }: MarketViewProps) {
           title: formTitle.trim(),
           subject: formSubject,
           authorId: user?.id || "student-guest",
-          authorName: formAuthor.trim() || "Student",
+          authorName: formAuthor.trim() || user?.name || "Student",
+          authorAvatar: user?.avatar,
           description: formDescription.trim() || `Ispitna skripta i beleške (${parsedPdf.pageCount} str.)`,
           fileName: selectedPdfFile.name,
           fileSize: selectedPdfFile.size,
@@ -204,15 +248,19 @@ export function MarketView({ onOpenNotesStudio }: MarketViewProps) {
 
   const handleSaveToMyLibrary = (note: MarketNote, e: React.MouseEvent) => {
     e.stopPropagation();
+    const topics = Array.isArray(note.verification?.topicsCovered)
+      ? note.verification.topicsCovered
+      : [note.subject || note.title, "Ispitna skripta i analiza", "Verifikovani ispitni materijal"];
+
     const myNote: Note = {
       id: `saved-${Date.now()}`,
       title: note.title,
       topic: note.subject,
       content: {
         title: note.title,
-        keyPoints: note.verification.topicsCovered,
-        summary: note.description,
-        fullNotes: `### ${note.title}\n\n**Autor:** ${note.authorName}\n**Obim:** ${note.pageCount} strana\n**AI Ocena Tačnosti:** ${note.verification.accuracyScore}/100\n\n${note.verification.verdictSummary}`,
+        keyPoints: topics,
+        summary: note.description || `${note.title} - verifikovana skripta`,
+        fullNotes: `### ${note.title}\n\n**Autor:** ${note.authorName}\n**Obim:** ${note.pageCount} strana\n**AI Ocena Tačnosti:** ${note.verification?.accuracyScore ?? 100}/100\n\n${note.verification?.verdictSummary || ""}`,
       },
       createdAt: new Date().toISOString(),
     };
@@ -434,11 +482,48 @@ export function MarketView({ onOpenNotesStudio }: MarketViewProps) {
                   {note.title}
                 </h3>
 
-                {/* Author info */}
-                <p className="mt-1 text-[11px] text-muted-foreground flex items-center gap-1">
-                  <span>Autor:</span>
-                  <span className="font-semibold text-foreground">{note.authorName}</span>
-                </p>
+                {/* Author info with Avatar & Name */}
+                {(() => {
+                  const isCurrentUser = Boolean(user?.id && note.authorId === user.id);
+                  const authorDisplayName = isCurrentUser ? (user?.name || note.authorName) : note.authorName;
+                  const authorAvatarPic = isCurrentUser ? (user?.avatar !== undefined ? user.avatar : note.authorAvatar) : note.authorAvatar;
+                  const isEmoji = Boolean(authorAvatarPic && authorAvatarPic.length <= 4 && !authorAvatarPic.startsWith("data:"));
+                  const authorInitials = authorDisplayName
+                    .split(/\s+/)
+                    .map((p) => p[0])
+                    .slice(0, 2)
+                    .join("")
+                    .toUpperCase();
+
+                  return (
+                    <div className="mt-2.5 flex items-center gap-2">
+                      {authorAvatarPic && !isEmoji ? (
+                        <img
+                          src={authorAvatarPic}
+                          alt={authorDisplayName}
+                          className="h-5 w-5 rounded-md object-cover ring-1 ring-border/80 shrink-0"
+                        />
+                      ) : isEmoji ? (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-primary/10 text-xs shrink-0">
+                          {authorAvatarPic}
+                        </span>
+                      ) : (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-primary/15 text-[9px] font-black text-primary shrink-0">
+                          {authorInitials || "S"}
+                        </span>
+                      )}
+                      <p className="text-[11px] text-muted-foreground truncate flex items-center gap-1.5 min-w-0">
+                        <span className="shrink-0">Autor:</span>
+                        <span className="font-semibold text-foreground truncate">{authorDisplayName}</span>
+                        {isCurrentUser && (
+                          <span className="rounded-sm bg-primary/15 px-1 py-0.2 text-[9px] font-extrabold text-primary shrink-0">
+                            Ti
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {/* Description */}
                 <p className="mt-2.5 text-xs text-muted-foreground line-clamp-3 leading-relaxed">
@@ -498,7 +583,8 @@ export function MarketView({ onOpenNotesStudio }: MarketViewProps) {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      downloadMarketNotePdf(note);
+                      const currentAuthor = note.authorId === user?.id ? (user?.name || note.authorName) : note.authorName;
+                      downloadMarketNotePdf(note, currentAuthor);
                       toast.success(`Preuzimanje "${note.fileName}" započeto.`);
                     }}
                     className="flex cursor-pointer items-center gap-1 rounded-xl bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground transition-all hover:bg-primary/90 shadow-2xs"
@@ -814,9 +900,48 @@ export function MarketView({ onOpenNotesStudio }: MarketViewProps) {
                 <h2 className="text-lg font-extrabold text-foreground leading-snug">
                   {detailModalNote.title}
                 </h2>
-                <p className="text-xs text-muted-foreground">
-                  Objavio: <span className="font-semibold text-foreground">{detailModalNote.authorName}</span> • Obim: {detailModalNote.pageCount} strana • {new Date(detailModalNote.createdAt).toLocaleDateString()}
-                </p>
+                {(() => {
+                  const isCurrentUser = Boolean(user?.id && detailModalNote.authorId === user.id);
+                  const detailAuthor = isCurrentUser ? (user?.name || detailModalNote.authorName) : detailModalNote.authorName;
+                  const detailAvatar = isCurrentUser ? (user?.avatar !== undefined ? user.avatar : detailModalNote.authorAvatar) : detailModalNote.authorAvatar;
+                  const isEmoji = Boolean(detailAvatar && detailAvatar.length <= 4 && !detailAvatar.startsWith("data:"));
+                  const detailInitials = detailAuthor
+                    .split(/\s+/)
+                    .map((p) => p[0])
+                    .slice(0, 2)
+                    .join("")
+                    .toUpperCase();
+
+                  return (
+                    <div className="flex items-center gap-2 pt-1">
+                      {detailAvatar && !isEmoji ? (
+                        <img
+                          src={detailAvatar}
+                          alt={detailAuthor}
+                          className="h-6 w-6 rounded-md object-cover ring-1 ring-border"
+                        />
+                      ) : isEmoji ? (
+                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-sm">
+                          {detailAvatar}
+                        </span>
+                      ) : (
+                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/15 text-[10px] font-black text-primary">
+                          {detailInitials || "S"}
+                        </span>
+                      )}
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                        <span>Objavio:</span>
+                        <span className="font-semibold text-foreground">{detailAuthor}</span>
+                        {isCurrentUser && (
+                          <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[9px] font-extrabold text-primary">
+                            Tvoj nalog
+                          </span>
+                        )}
+                        <span>• Obim: {detailModalNote.pageCount} strana • {new Date(detailModalNote.createdAt).toLocaleDateString()}</span>
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
               <button
                 type="button"
@@ -922,7 +1047,8 @@ export function MarketView({ onOpenNotesStudio }: MarketViewProps) {
                 <Button
                   type="button"
                   onClick={() => {
-                    downloadMarketNotePdf(detailModalNote);
+                    const currentAuthor = detailModalNote.authorId === user?.id ? (user?.name || detailModalNote.authorName) : detailModalNote.authorName;
+                    downloadMarketNotePdf(detailModalNote, currentAuthor);
                     toast.success(`Preuzimanje "${detailModalNote.fileName}" započeto.`);
                   }}
                   className="gap-1.5 rounded-xl text-xs font-extrabold shadow-sm"

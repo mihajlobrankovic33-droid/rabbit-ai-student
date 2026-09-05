@@ -350,19 +350,90 @@ export async function deleteMarketNote(noteId: string): Promise<boolean> {
 }
 
 /**
- * Downloads or generates a PDF for a market note
+ * Updates the author's display name and avatar across all Market notes
+ * created by this author, both locally in localStorage and on the server.
  */
-export function downloadMarketNotePdf(note: MarketNote): void {
-  // If we already have the raw PDF data URL
-  if (note.pdfDataUrl && note.pdfDataUrl.startsWith("data:application/pdf")) {
-    const a = document.createElement("a");
-    a.href = note.pdfDataUrl;
-    a.download = note.fileName || `${note.title.replace(/\s+/g, "_")}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    return;
+export async function syncAuthorProfileAcrossMarketNotes(
+  authorId: string,
+  newAuthorName: string,
+  newAuthorAvatar?: string
+): Promise<number> {
+  let updatedCount = 0;
+  const cleanName = newAuthorName.trim();
+
+  // 1. Update in LocalStorage
+  try {
+    const raw = localStorage.getItem(LOCAL_MARKET_KEY);
+    if (raw) {
+      const parsed: MarketNote[] = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((n) => {
+          if (n.authorId === authorId) {
+            n.authorName = cleanName;
+            if (newAuthorAvatar !== undefined) {
+              n.authorAvatar = newAuthorAvatar;
+            }
+            updatedCount++;
+          }
+        });
+        localStorage.setItem(LOCAL_MARKET_KEY, JSON.stringify(parsed));
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to sync author in local market notes:", err);
   }
+
+  // 2. Update on Server
+  try {
+    await fetch("/api/market/notes/author", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        authorId,
+        authorName: cleanName,
+        authorAvatar: newAuthorAvatar,
+      }),
+    });
+  } catch (err) {
+    console.warn("Failed to sync author on server:", err);
+  }
+
+  // 3. Dispatch global event for real-time reactivity in UI
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("market-notes-updated", {
+        detail: { authorId, authorName: cleanName, authorAvatar: newAuthorAvatar },
+      })
+    );
+  }
+
+  return updatedCount;
+}
+
+/**
+ * Normalizes special characters for standard jsPDF Helvetica fonts
+ */
+function safePdfText(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/[čćČĆ]/g, (m) => (m === "č" || m === "ć" ? "c" : "C"))
+    .replace(/[šŠ]/g, (m) => (m === "š" ? "s" : "S"))
+    .replace(/[žŽ]/g, (m) => (m === "ž" ? "z" : "Z"))
+    .replace(/[đĐ]/g, (m) => (m === "đ" ? "dj" : "Dj"));
+}
+
+/**
+ * Downloads or generates an official academic PDF for a market note
+ * displaying the verified author's latest updated name
+ */
+export function downloadMarketNotePdf(
+  note: MarketNote,
+  authorNameOverride?: string
+): void {
+  const author = (authorNameOverride || note.authorName || "Student").trim();
+  const safeAuthor = safePdfText(author);
+  const safeTitle = safePdfText(note.title);
+  const safeSubject = safePdfText(note.subject);
 
   // Generate an authentic, formatted academic PDF document using jsPDF
   try {
@@ -374,84 +445,132 @@ export function downloadMarketNotePdf(note: MarketNote): void {
 
     // Page 1: Academic Title and AI Verification Badge
     doc.setFillColor(30, 41, 59);
-    doc.rect(0, 0, 210, 40, "F");
+    doc.rect(0, 0, 210, 42, "F");
 
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("STUDY BUDDY - STUDENT NOTES MARKET", 15, 20);
+    doc.setFontSize(17);
+    doc.text("STUDY BUDDY - STUDENT NOTES MARKET", 15, 18);
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    doc.text(`AI Verified Academic Material • Accuracy Score: ${note.verification.accuracyScore}%`, 15, 30);
+    doc.text(
+      `AI Verified Academic Document • Accuracy Score: ${note.verification.accuracyScore}%`,
+      15,
+      28
+    );
+    doc.setFontSize(9);
+    doc.setTextColor(226, 232, 240);
+    doc.text(`Official Academic Certification & Study Syllabus`, 15, 36);
 
     // Document Details
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(16);
     doc.setFont("helvetica", "bold");
-    doc.text(note.title, 15, 55);
+    doc.text(safeTitle, 15, 54);
 
     doc.setFontSize(11);
     doc.setFont("helvetica", "normal");
-    doc.text(`Predmet: ${note.subject} | Autor: ${note.authorName} | Obim: ${note.pageCount} strana`, 15, 65);
-    doc.text(`Datum objave: ${new Date(note.createdAt).toLocaleDateString()}`, 15, 72);
+    doc.text(
+      `Predmet: ${safeSubject}  |  Autor: ${safeAuthor}  |  Obim: ${note.pageCount} strana`,
+      15,
+      64
+    );
+    doc.text(
+      `Datum objave: ${new Date(note.createdAt).toLocaleDateString()}  |  Izdato za: ${safeAuthor}`,
+      15,
+      71
+    );
 
     // AI Verification Audit Box
     doc.setDrawColor(16, 185, 129);
     doc.setFillColor(240, 253, 244);
-    doc.roundedRect(15, 80, 180, 45, 3, 3, "FD");
+    doc.roundedRect(15, 78, 180, 46, 3, 3, "FD");
 
     doc.setTextColor(6, 95, 70);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.text(`AI Verifikacioni Sertifikat (Ocena: ${note.verification.accuracyScore}/100)`, 20, 90);
+    doc.text(
+      `AI Verifikacioni Sertifikat (Ocena: ${note.verification.accuracyScore}/100)`,
+      20,
+      88
+    );
 
-    doc.setFontSize(10);
+    doc.setFontSize(9.5);
     doc.setFont("helvetica", "normal");
-    const auditLines = doc.splitTextToSize(note.verification.verdictSummary, 170);
-    doc.text(auditLines, 20, 98);
+    const safeSummary = safePdfText(note.verification.verdictSummary);
+    const auditLines = doc.splitTextToSize(safeSummary, 170);
+    doc.text(auditLines, 20, 96);
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Zvanicni autor i vlasnik materijala: ${safeAuthor}`, 20, 118);
 
     // Description & Overview
     doc.setTextColor(15, 23, 42);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(13);
-    doc.text("Opis i Sadržaj Skripte:", 15, 138);
+    doc.text("Opis i Sadrzaj Skripte:", 15, 136);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    const descLines = doc.splitTextToSize(note.description, 180);
-    doc.text(descLines, 15, 146);
+    const safeDesc = safePdfText(
+      note.description || `Ispitna skripta i beleske za predmet ${note.subject}.`
+    );
+    const descLines = doc.splitTextToSize(safeDesc, 180);
+    doc.text(descLines, 15, 144);
 
     // Topics covered
+    let y = 172;
     doc.setFont("helvetica", "bold");
-    doc.text("Pokrivena Poglavlja i Teme:", 15, 175);
+    doc.text("Pokrivena Poglavlja i Teme:", 15, y);
     doc.setFont("helvetica", "normal");
-    let y = 183;
+    y += 8;
     note.verification.topicsCovered.forEach((topic, idx) => {
-      doc.text(`${idx + 1}. ${topic}`, 20, y);
-      y += 7;
+      if (y < 265) {
+        doc.text(`${idx + 1}. ${safePdfText(topic)}`, 20, y);
+        y += 6.5;
+      }
     });
 
     // Strengths
     if (note.verification.strengths && note.verification.strengths.length > 0) {
       y += 4;
       doc.setFont("helvetica", "bold");
-      doc.text("Ključne Prednosti:", 15, y);
+      doc.text("Kljucne Prednosti:", 15, y);
       doc.setFont("helvetica", "normal");
-      y += 8;
+      y += 7.5;
       note.verification.strengths.forEach((s) => {
-        doc.text(`• ${s}`, 20, y);
-        y += 6;
+        if (y < 270) {
+          doc.text(`- ${safePdfText(s)}`, 20, y);
+          y += 6;
+        }
       });
     }
 
     // Footer
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(100, 116, 139);
-    doc.text(`Generisano na Study Buddy platformi • Originalni fajl: ${note.fileName} (${note.pageCount} str.)`, 15, 285);
+    doc.text(
+      `Generisano na Study Buddy platformi  |  Autor: ${safeAuthor}  |  Fajl: ${safePdfText(
+        note.fileName
+      )} (${note.pageCount} str.)`,
+      15,
+      285
+    );
 
-    doc.save(note.fileName || `${note.title.replace(/\s+/g, "_")}.pdf`);
+    const safeFileName = `${safeTitle.replace(/[^a-zA-Z0-9_-]+/g, "_")}_autor_${safeAuthor.replace(/[^a-zA-Z0-9_-]+/g, "_")}.pdf`;
+    doc.save(safeFileName);
   } catch (err) {
     console.error("Failed to generate PDF download:", err);
+    // Fallback: If raw PDF dataUrl was stored, download that
+    if (note.pdfDataUrl && note.pdfDataUrl.startsWith("data:application/pdf")) {
+      const a = document.createElement("a");
+      a.href = note.pdfDataUrl;
+      a.download = note.fileName || `${note.title.replace(/\s+/g, "_")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
   }
 }

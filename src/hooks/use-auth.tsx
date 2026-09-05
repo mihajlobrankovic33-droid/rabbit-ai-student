@@ -4,6 +4,7 @@ export interface User {
   id: string;
   name?: string;
   email?: string;
+  avatar?: string;
   isAnonymous?: boolean;
 }
 
@@ -13,6 +14,7 @@ interface AuthContextType {
   isLoading: boolean;
   signIn: (provider: string, params?: Record<string, unknown>) => Promise<void>;
   signOut: () => Promise<void>;
+  updateProfile: (updates: { name?: string; avatar?: string }) => Promise<void>;
 }
 
 const AUTH_STORAGE_KEY = "study_buddy_current_user";
@@ -95,6 +97,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const updateProfile = async (updates: { name?: string; avatar?: string }) => {
+    setUser((prev) => {
+      if (!prev) {
+        const fallbackUser: User = {
+          id: `user-${Date.now()}`,
+          name: updates.name?.trim() || "Student",
+          avatar: updates.avatar,
+          isAnonymous: false,
+        };
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(fallbackUser));
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("study_buddy_profile_updated", { detail: fallbackUser })
+          );
+        }
+        return fallbackUser;
+      }
+      const updatedUser: User = {
+        ...prev,
+        ...(updates.name !== undefined ? { name: updates.name.trim() } : {}),
+        ...(updates.avatar !== undefined ? { avatar: updates.avatar } : {}),
+      };
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("study_buddy_profile_updated", { detail: updatedUser })
+        );
+      }
+      return updatedUser;
+    });
+  };
+
   const value = useMemo(
     () => ({
       user,
@@ -102,6 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       signIn,
       signOut,
+      updateProfile,
     }),
     [user, isLoading]
   );

@@ -53,7 +53,7 @@ export function useStudyAI() {
   );
 
   const generateNotes = useCallback(
-    async (title: string, topic: string): Promise<{ content: StudyContent }> => {
+    async (title: string, topic: string): Promise<StudyContent> => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -70,7 +70,30 @@ export function useStudyAI() {
           apiKey,
           controller.signal
         );
-        return result;
+
+        const rawObj = result as unknown as Record<string, unknown>;
+        const inner = (
+          rawObj.content && typeof rawObj.content === "object"
+            ? rawObj.content
+            : rawObj
+        ) as Record<string, unknown>;
+
+        const safeKeyPoints = Array.isArray(inner.keyPoints)
+          ? (inner.keyPoints as unknown[]).map(String)
+          : typeof inner.keyPoints === "string"
+          ? [inner.keyPoints]
+          : [
+              `Osnovni koncepti i definicije za ${title}`,
+              "Korak po korak analiza mehanizama",
+              "Praktična primena i najčešće greške",
+            ];
+
+        return {
+          title: typeof inner.title === "string" ? inner.title : (title || "Study Notes"),
+          keyPoints: safeKeyPoints,
+          summary: typeof inner.summary === "string" ? inner.summary : (topic || title),
+          fullNotes: typeof inner.fullNotes === "string" ? inner.fullNotes : "",
+        };
       } finally {
         setIsLoading(false);
         abortControllerRef.current = null;

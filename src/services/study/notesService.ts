@@ -29,16 +29,46 @@ export function getNotes(userId?: string): Note[] {
   try {
     const key = getNotesStorageKey(userId);
     const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw);
+    let parsed: Note[] = [];
 
-    // Fallback: check legacy un-scoped key if user has no notes in new key
-    const legacyRaw = localStorage.getItem("study_buddy_notes");
-    if (legacyRaw) {
-      const parsed: Note[] = JSON.parse(legacyRaw);
-      localStorage.setItem(key, JSON.stringify(parsed));
-      return parsed;
+    if (raw) {
+      parsed = JSON.parse(raw);
+    } else {
+      // Fallback: check legacy un-scoped key if user has no notes in new key
+      const legacyRaw = localStorage.getItem("study_buddy_notes");
+      if (legacyRaw) {
+        parsed = JSON.parse(legacyRaw);
+        localStorage.setItem(key, JSON.stringify(parsed));
+      }
     }
-    return [];
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.map((n) => {
+      // Handle potential double nesting e.g. { content: { content: ... } }
+      let contentObj = (n.content || {}) as Record<string, unknown>;
+      if (contentObj && typeof contentObj === "object" && "content" in contentObj && contentObj.content) {
+        contentObj = (contentObj.content || {}) as Record<string, unknown>;
+      }
+
+      const safeKeyPoints = Array.isArray(contentObj.keyPoints)
+        ? (contentObj.keyPoints as unknown[]).map(String)
+        : typeof contentObj.keyPoints === "string"
+        ? [contentObj.keyPoints]
+        : [];
+
+      return {
+        ...n,
+        title: n.title || (typeof contentObj.title === "string" ? contentObj.title : "Beleške"),
+        topic: n.topic || "",
+        content: {
+          title: typeof contentObj.title === "string" ? contentObj.title : (n.title || "Beleške"),
+          keyPoints: safeKeyPoints,
+          summary: typeof contentObj.summary === "string" ? contentObj.summary : "",
+          fullNotes: typeof contentObj.fullNotes === "string" ? contentObj.fullNotes : "",
+        },
+      };
+    });
   } catch {
     return [];
   }
@@ -49,12 +79,37 @@ export function saveNote(note: Note, userId?: string): void {
     const uid = userId || note.userId || getCurrentUserId();
     const key = getNotesStorageKey(uid);
     const existing = getNotes(uid);
-    const updatedNote = { ...note, userId: uid, updatedAt: new Date().toISOString() };
+
+    let contentObj = (note.content || {}) as Record<string, unknown>;
+    if (contentObj && typeof contentObj === "object" && "content" in contentObj && contentObj.content) {
+      contentObj = (contentObj.content || {}) as Record<string, unknown>;
+    }
+
+    const safeKeyPoints = Array.isArray(contentObj.keyPoints)
+      ? (contentObj.keyPoints as unknown[]).map(String)
+      : typeof contentObj.keyPoints === "string"
+      ? [contentObj.keyPoints]
+      : [];
+
+    const sanitizedNote: Note = {
+      ...note,
+      title: note.title || (typeof contentObj.title === "string" ? contentObj.title : "Beleške"),
+      topic: note.topic || "",
+      content: {
+        title: typeof contentObj.title === "string" ? contentObj.title : (note.title || "Beleške"),
+        keyPoints: safeKeyPoints,
+        summary: typeof contentObj.summary === "string" ? contentObj.summary : "",
+        fullNotes: typeof contentObj.fullNotes === "string" ? contentObj.fullNotes : "",
+      },
+      userId: uid,
+      updatedAt: new Date().toISOString(),
+    };
+
     const index = existing.findIndex((n) => n.id === note.id);
     if (index >= 0) {
-      existing[index] = updatedNote;
+      existing[index] = sanitizedNote;
     } else {
-      existing.unshift(updatedNote);
+      existing.unshift(sanitizedNote);
     }
     localStorage.setItem(key, JSON.stringify(existing));
   } catch (err) {

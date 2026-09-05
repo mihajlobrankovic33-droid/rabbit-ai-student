@@ -47,6 +47,7 @@ export interface MarketComment {
   id: string;
   authorId: string;
   authorName: string;
+  authorAvatar?: string;
   text: string;
   createdAt: string;
 }
@@ -57,6 +58,7 @@ export interface MarketNote {
   subject: string;
   authorId: string;
   authorName: string;
+  authorAvatar?: string;
   description: string;
   fileName: string;
   fileSize: number;

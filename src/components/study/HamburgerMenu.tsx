@@ -26,6 +26,7 @@ import {
   WifiOff,
   X,
   ShoppingBag,
+  Edit3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
@@ -47,7 +48,6 @@ import {
   isAppLocallyCached,
 } from "@/services/study/offlineService";
 import { getSelectedAIProvider } from "@/services/study/aiService";
-import { getOllamaConfig } from "@/services/study/ollamaService";
 import type { ChatSession, Note } from "@/types/study";
 import { toast } from "sonner";
 
@@ -74,12 +74,14 @@ interface HamburgerMenuProps {
   timerMode?: "focus" | "break";
   onToggleTimer?: () => void;
   onResetTimer?: () => void;
+  onOpenProfile?: () => void;
 }
 
 export function HamburgerMenu({
   open,
   onClose,
   onOpenSettings,
+  onOpenProfile,
   sessions = [],
   activeSessionId,
   onSelectSession,
@@ -165,7 +167,6 @@ export function HamburgerMenu({
   if (!open) return null;
 
   const currentProvider = getSelectedAIProvider();
-  const ollama = getOllamaConfig();
   const displayName = user?.name || user?.email || "Student";
   const initials = displayName
     .split(/\s+/)
@@ -626,8 +627,6 @@ export function HamburgerMenu({
               <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
                 {currentProvider === "gemini"
                   ? "Gemini Flash (Thinking)"
-                  : currentProvider === "ollama"
-                  ? `Ollama (${ollama.selectedModel})`
                   : currentProvider === "in_browser"
                   ? "In-Browser WebGPU"
                   : "Built-in Offline"}
@@ -649,17 +648,43 @@ export function HamburgerMenu({
         </div>
 
         {/* User Profile & Log Out in Hamburger */}
-        <div className="mt-6 border-t border-border/60 pt-4">
-          <div className="mb-3 flex items-center gap-3 rounded-2xl bg-muted/40 p-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/20 text-sm font-extrabold text-primary">
-              {initials || "S"}
-            </span>
+        <div className="mt-6 border-t border-border/60 pt-4 space-y-2.5">
+          <div className="flex items-center gap-3 rounded-2xl bg-muted/40 p-3 border border-border/60">
+            {user?.avatar && !user.avatar.startsWith("data:") && user.avatar.length <= 4 ? (
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-2xl ring-2 ring-primary/25">
+                {user.avatar}
+              </span>
+            ) : user?.avatar ? (
+              <img
+                src={user.avatar}
+                alt={displayName}
+                className="h-11 w-11 shrink-0 rounded-2xl object-cover ring-2 ring-primary/25 shadow-xs"
+              />
+            ) : (
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/20 text-sm font-black text-primary ring-2 ring-primary/25">
+                {initials || "S"}
+              </span>
+            )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-bold text-foreground">{displayName}</p>
-              <p className="truncate text-[11px] text-muted-foreground flex items-center gap-1">
+              <p className="truncate text-[10px] text-muted-foreground flex items-center gap-1">
                 <Flame className="h-3 w-3 text-amber-500" /> {t("activeStudent")}
               </p>
             </div>
+            {onOpenProfile && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenProfile();
+                }}
+                className="flex cursor-pointer items-center gap-1 rounded-xl bg-primary/10 px-2.5 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/20"
+                title="Promeni ime ili profilnu sliku"
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                <span>Uredi</span>
+              </button>
+            )}
           </div>
 
           <Button

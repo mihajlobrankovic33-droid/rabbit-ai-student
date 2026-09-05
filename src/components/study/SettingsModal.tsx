@@ -8,13 +8,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Sparkles,
   Cpu,
   Download,
   WifiOff,
-  RefreshCw,
   HardDriveDownload,
   CheckCircle2,
   AlertCircle,
@@ -34,13 +32,6 @@ import {
   checkWebGPUCapability,
   WebGPUCapability,
 } from "@/services/study/webLlmService";
-import {
-  RECOMMENDED_LIGHT_MODELS,
-  checkOllamaConnection,
-  getOllamaConfig,
-  saveOllamaConfig,
-  OllamaModelInfo,
-} from "@/services/study/ollamaService";
 import {
   downloadAppForOffline,
   isAppLocallyCached,
@@ -69,24 +60,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     hasShaderF16: false,
   });
 
-  // Ollama state
-  const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
-  const [selectedModel, setSelectedModel] = useState("qwen2.5:0.5b");
-  const [customModel, setCustomModel] = useState("");
-
-  const [isTestingOllama, setIsTestingOllama] = useState(false);
-  const [ollamaStatus, setOllamaStatus] = useState<{
-    tested: boolean;
-    connected: boolean;
-    latencyMs?: number;
-    error?: string;
-    models: OllamaModelInfo[];
-  }>({
-    tested: false,
-    connected: false,
-    models: [],
-  });
-
   // Offline / SW state
   const [isAppCached, setIsAppCached] = useState(false);
   const [isDownloadingApp, setIsDownloadingApp] = useState(false);
@@ -110,9 +83,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
         }
       });
 
-      const ollamaCfg = getOllamaConfig();
-      setOllamaUrl(ollamaCfg.baseUrl);
-      setSelectedModel(ollamaCfg.selectedModel);
       setIsAppCached(isAppLocallyCached());
     }
   }, [open]);
@@ -148,27 +118,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     }
   };
 
-  const handleTestOllama = async () => {
-    setIsTestingOllama(true);
-    try {
-      const result = await checkOllamaConnection(ollamaUrl);
-      setOllamaStatus({
-        tested: true,
-        connected: result.connected,
-        latencyMs: result.latencyMs,
-        error: result.error,
-        models: result.models,
-      });
-      if (result.connected) {
-        toast.success(`Ollama connected! (${result.latencyMs}ms, ${result.models.length} models installed)`);
-      } else {
-        toast.error("Could not reach Ollama. Switch to In-Browser AI or Built-in Brain.");
-      }
-    } finally {
-      setIsTestingOllama(false);
-    }
-  };
-
   const handleDownloadOfflineApp = async () => {
     setIsDownloadingApp(true);
     setDownloadProgress(10);
@@ -186,20 +135,9 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     }
   };
 
-  const handleCopyCommand = (cmd: string) => {
-    navigator.clipboard.writeText(cmd);
-    toast.success("Command copied to clipboard!");
-  };
-
   const handleSaveAll = () => {
     setSelectedAIProvider(provider);
     setSavedBrowserModel(browserModel);
-    saveOllamaConfig({
-      baseUrl: ollamaUrl.trim() || "http://localhost:11434",
-      selectedModel: customModel.trim() || selectedModel,
-      repeatPenalty: 1.3,
-      temperature: 0.75,
-    });
     toast.success("Settings saved successfully!");
     onOpenChange(false);
   };
@@ -215,7 +153,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
             <div>
               <DialogTitle className="text-lg font-bold">AI Models & Offline Settings</DialogTitle>
               <DialogDescription className="text-xs">
-                Download and run open-source AI models right inside this website, or connect to Ollama.
+                Download and run open-source AI models right inside this website with WebGPU, or use cloud/built-in brains.
               </DialogDescription>
             </div>
           </div>
@@ -256,7 +194,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Choose AI Engine
               </label>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-2 sm:grid-cols-3">
                 {/* 1. Gemini Cloud AI */}
                 <button
                   type="button"
@@ -278,28 +216,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   </p>
                 </button>
 
-                {/* 2. Ollama Local Daemon */}
-                <button
-                  type="button"
-                  onClick={() => setProvider("ollama")}
-                  className={`cursor-pointer rounded-xl border p-3 text-left transition-all ${
-                    provider === "ollama"
-                      ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary shadow-sm"
-                      : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-sm text-foreground">Ollama</span>
-                    <span className="rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400">
-                      Local PC
-                    </span>
-                  </div>
-                  <p className="text-[11px] leading-relaxed">
-                    Connect to your local Ollama instance (e.g. qwen2.5:0.5b, smollm:135m, llama3.2:1b).
-                  </p>
-                </button>
-
-                {/* 3. In-Browser AI */}
+                {/* 2. In-Browser AI */}
                 <button
                   type="button"
                   onClick={() => setProvider("in_browser")}
@@ -320,7 +237,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   </p>
                 </button>
 
-                {/* 4. Built-in Brain */}
+                {/* 3. Built-in Brain */}
                 <button
                   type="button"
                   onClick={() => setProvider("builtin_offline")}
@@ -465,204 +382,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                         : `Download ${IN_BROWSER_MODELS.find((m) => m.id === browserModel)?.name} to Browser`}
                     </Button>
                   )}
-                </div>
-              </div>
-            )}
-
-            {/* If Ollama is selected */}
-            {provider === "ollama" && (
-              <div className="space-y-3.5 rounded-xl border border-primary/20 bg-primary/5 p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Cpu className="h-4 w-4 text-primary" />
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                      Ollama Configuration
-                    </h3>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleTestOllama}
-                    disabled={isTestingOllama}
-                    className="h-7 text-xs gap-1.5 bg-background"
-                  >
-                    <RefreshCw className={`h-3 w-3 ${isTestingOllama ? "animate-spin" : ""}`} />
-                    Test Connection
-                  </Button>
-                </div>
-
-                {/* Connection Status Banner */}
-                {ollamaStatus.tested && (
-                  <div
-                    className={`rounded-xl p-3 text-xs flex flex-col gap-2 ${
-                      ollamaStatus.connected
-                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20"
-                        : "bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20"
-                    }`}
-                  >
-                    <div className="flex items-start gap-2">
-                      {ollamaStatus.connected ? (
-                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500 mt-0.5" />
-                      ) : (
-                        <AlertCircle className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
-                      )}
-                      <div className="flex-1">
-                        <p className="font-semibold">
-                          {ollamaStatus.connected
-                            ? `Connected to Ollama (${ollamaStatus.latencyMs}ms)`
-                            : "Ollama Not Connected"}
-                        </p>
-                        <p className="text-[11px] mt-0.5 opacity-90 leading-relaxed">
-                          {ollamaStatus.connected
-                            ? `Found ${ollamaStatus.models.length} installed model(s) ready for offline study.`
-                            : (ollamaStatus.error || "Cannot reach Ollama. Start it with CORS enabled or switch to In-Browser AI.")}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Base URL */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-foreground">Ollama Endpoint URL</label>
-                  <Input
-                    type="text"
-                    value={ollamaUrl}
-                    onChange={(e) => setOllamaUrl(e.target.value)}
-                    placeholder="http://localhost:11434"
-                    className="font-mono text-xs bg-background"
-                  />
-                </div>
-
-                {/* Model selection */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-foreground">
-                      Select Model
-                    </label>
-                    {ollamaStatus.connected && ollamaStatus.models.length > 0 && (
-                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
-                        ✓ {ollamaStatus.models.length} model(s) detected on machine
-                      </span>
-                    )}
-                  </div>
-
-                  {/* If models detected from live Ollama instance */}
-                  {ollamaStatus.connected && ollamaStatus.models.length > 0 && (
-                    <div className="space-y-1.5 pb-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                        Installed on Your Computer:
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {ollamaStatus.models.map((m) => {
-                          const isSelected = selectedModel === m.name;
-                          return (
-                            <button
-                              key={m.name}
-                              type="button"
-                              onClick={() => {
-                                setSelectedModel(m.name);
-                                setCustomModel("");
-                              }}
-                              className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-mono transition-all ${
-                                isSelected
-                                  ? "bg-primary text-primary-foreground font-bold shadow-xs"
-                                  : "border border-border bg-card text-foreground hover:bg-muted"
-                              }`}
-                            >
-                              {m.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {RECOMMENDED_LIGHT_MODELS.map((model) => {
-                      const isSelected = (selectedModel === model.id || selectedModel === model.name) && !customModel;
-                      return (
-                        <button
-                          key={model.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedModel(model.id);
-                            setCustomModel("");
-                          }}
-                          className={`cursor-pointer rounded-xl border p-2.5 text-left transition-all ${
-                            isSelected
-                              ? "border-primary bg-card text-foreground ring-1 ring-primary"
-                              : "border-border/70 bg-card/50 text-muted-foreground hover:border-border hover:text-foreground"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-mono text-xs font-bold text-foreground">{model.name}</span>
-                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground font-semibold">
-                              {model.sizeLabel}
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{model.description}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Custom Model Input */}
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-muted-foreground">Or Enter Any Custom Model Name</label>
-                  <Input
-                    type="text"
-                    value={customModel}
-                    onChange={(e) => setCustomModel(e.target.value)}
-                    placeholder="e.g. llama3:8b, mistral, deepseek-r1:7b..."
-                    className="font-mono text-xs bg-background h-8"
-                  />
-                </div>
-
-                {/* Student Quick Setup Help */}
-                <div className="rounded-xl border border-border/70 bg-card p-3.5 text-xs space-y-2.5">
-                  <p className="font-bold text-foreground">💡 How to start Ollama with browser access (CORS):</p>
-                  <ol className="list-decimal pl-4 space-y-2 text-muted-foreground text-[11px]">
-                    <li>
-                      Download and install free Ollama from{" "}
-                      <a
-                        href="https://ollama.com"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-primary font-semibold hover:underline"
-                      >
-                        ollama.com
-                      </a>
-                    </li>
-                    <li>
-                      Download the model:
-                      <div className="mt-1 flex items-center justify-between rounded-lg bg-muted/70 px-2.5 py-1.5 font-mono text-[11px] text-foreground">
-                        <span>ollama run qwen2.5:0.5b</span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyCommand("ollama run qwen2.5:0.5b")}
-                          className="cursor-pointer font-sans text-xs font-semibold text-primary hover:underline"
-                        >
-                          Copy
-                        </button>
-                      </div>
-                    </li>
-                    <li>
-                      <strong>Start Ollama with CORS enabled</strong>:
-                      <div className="mt-1 flex items-center justify-between rounded-lg bg-muted/70 px-2.5 py-1.5 font-mono text-[11px] text-foreground">
-                        <span>OLLAMA_ORIGINS="*" ollama serve</span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyCommand('OLLAMA_ORIGINS="*" ollama serve')}
-                          className="cursor-pointer font-sans text-xs font-semibold text-primary hover:underline"
-                        >
-                          Copy
-                        </button>
-                      </div>
-                    </li>
-                  </ol>
                 </div>
               </div>
             )}

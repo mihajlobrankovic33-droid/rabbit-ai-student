@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import type { StudyContent } from "@/types/study";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +23,7 @@ interface GeneratedContentProps {
 }
 
 export function GeneratedContent({
-  content,
+  content: rawContent,
   isGenerating,
   onSave,
   saved,
@@ -31,11 +31,36 @@ export function GeneratedContent({
   const [copied, setCopied] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
 
+  // Normalize content to ensure keyPoints, summary, and title are always safe
+  const content = useMemo<StudyContent | null>(() => {
+    if (!rawContent) return null;
+    const rawObj = rawContent as unknown as Record<string, unknown>;
+    const inner = (
+      rawObj.content && typeof rawObj.content === "object"
+        ? rawObj.content
+        : rawObj
+    ) as Record<string, unknown>;
+
+    const safeKeyPoints = Array.isArray(inner.keyPoints)
+      ? (inner.keyPoints as unknown[]).map(String)
+      : typeof inner.keyPoints === "string"
+      ? [inner.keyPoints]
+      : [];
+
+    return {
+      title: typeof inner.title === "string" ? inner.title : "Study Notes",
+      keyPoints: safeKeyPoints,
+      summary: typeof inner.summary === "string" ? inner.summary : "",
+      fullNotes: typeof inner.fullNotes === "string" ? inner.fullNotes : "",
+    };
+  }, [rawContent]);
+
   const handleCopy = () => {
     if (!content) return;
-    const text = `${content.title.toUpperCase()}\n\nKEY POINTS & MECHANISMS:\n${content.keyPoints
+    const safePoints = content.keyPoints || [];
+    const text = `${(content.title || "STUDY NOTES").toUpperCase()}\n\nKEY POINTS & MECHANISMS:\n${safePoints
       .map((k, i) => `${i + 1}. ${k}`)
-      .join("\n")}\n\nEXECUTIVE SUMMARY:\n${content.summary}${
+      .join("\n")}\n\nEXECUTIVE SUMMARY:\n${content.summary || ""}${
       content.fullNotes ? `\n\nDETAILED NOTES:\n${content.fullNotes}` : ""
     }`;
     navigator.clipboard.writeText(text);
@@ -147,12 +172,12 @@ export function GeneratedContent({
             </h3>
           </div>
           <span className="text-[11px] font-medium text-muted-foreground">
-            {content.keyPoints.length} Key Takeaways
+            {(content.keyPoints?.length ?? 0)} Key Takeaways
           </span>
         </div>
 
         <div className="grid gap-2.5">
-          {content.keyPoints.map((point, i) => (
+          {(content.keyPoints || []).map((point, i) => (
             <div
               key={i}
               className="flex items-start gap-3.5 rounded-2xl border border-border/70 bg-card p-3.5 text-sm leading-relaxed text-foreground shadow-2xs transition-all hover:border-primary/30"

@@ -334,6 +334,7 @@ YOUR AUDIT MANDATES:
     subject: string;
     authorId: string;
     authorName: string;
+    authorAvatar?: string;
     description: string;
     fileName: string;
     fileSize: number;
@@ -428,6 +429,31 @@ YOUR AUDIT MANDATES:
       }
     } catch {
       res.status(500).json({ error: "Failed to delete" });
+    }
+  });
+
+  app.patch("/api/market/notes/author", (req, res) => {
+    try {
+      const { authorId, authorName, authorAvatar } = req.body;
+      if (!authorId || !authorName) {
+        res.status(400).json({ error: "authorId and authorName are required" });
+        return;
+      }
+      let updatedCount = 0;
+      const cleanName = String(authorName).trim();
+      serverMarketNotes.forEach((n) => {
+        if (n.authorId === authorId) {
+          n.authorName = cleanName;
+          if (authorAvatar !== undefined) {
+            n.authorAvatar = authorAvatar;
+          }
+          updatedCount++;
+        }
+      });
+      res.json({ success: true, updatedCount });
+    } catch (err) {
+      console.error("Failed to update author notes:", err);
+      res.status(500).json({ error: "Failed to update author notes" });
     }
   });
 

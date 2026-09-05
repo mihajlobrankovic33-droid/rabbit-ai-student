@@ -37,10 +37,10 @@ const FEATURES = [
   },
   {
     icon: Cpu,
-    badge: "Free Local AI",
-    title: "Lightweight Ollama Models",
+    badge: "In-Browser AI",
+    title: "In-Browser WebGPU & Offline Brain",
     description:
-      "Run ultra-compact models like Qwen 2.5 (0.5B) and SmolLM (135M) locally on your laptop with zero cost, zero lag, and no internet required.",
+      "Run AI models directly in your browser with WebGPU, or use the built-in instant brain with zero cost, zero lag, and no external software required.",
   },
   {
     icon: Download,
@@ -174,7 +174,7 @@ export default function Landing() {
             transition={{ duration: 0.55, delay: 0.16 }}
             className="mt-6 max-w-2xl text-balance text-base leading-relaxed text-muted-foreground sm:text-lg"
           >
-            Ask any question, break down complex topics step-by-step, and generate instant revision notes. Powered by lightweight Ollama models and built-in offline intelligence that works anywhere without WiFi.
+            Ask any question, break down complex topics step-by-step, and generate instant revision notes. Powered by fast in-browser AI and built-in offline intelligence that works anywhere without WiFi.
           </motion.p>
 
           {/* CTA Buttons */}
@@ -212,7 +212,7 @@ export default function Landing() {
             </div>
             <div className="flex items-center gap-1.5 rounded-full border border-border/80 bg-card/80 px-3 py-1 font-medium shadow-xs">
               <Cpu className="h-3.5 w-3.5 text-purple-500" />
-              <span>Lightest Ollama Models (0.5B)</span>
+              <span>In-Browser WebGPU AI</span>
             </div>
             <div className="flex items-center gap-1.5 rounded-full border border-border/80 bg-card/80 px-3 py-1 font-medium shadow-xs">
               <ShieldCheck className="h-3.5 w-3.5 text-blue-500" />
@@ -281,7 +281,7 @@ export default function Landing() {
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  Offline & Ollama
+                  Offline & In-Browser AI
                 </button>
               </div>
             </div>
@@ -349,7 +349,7 @@ export default function Landing() {
                       <div>
                         <p className="font-bold">100% Offline Mode Active</p>
                         <p className="text-[11px] opacity-90">
-                          App shell cached via Service Worker. Using Ollama model <code>qwen2.5:0.5b</code>.
+                          App shell cached via Service Worker. In-browser offline intelligence ready.
                         </p>
                       </div>
                     </div>
@@ -360,9 +360,9 @@ export default function Landing() {
 
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div className="rounded-xl border border-border/70 bg-card p-3">
-                      <p className="font-semibold text-foreground">Lightweight Ollama</p>
+                      <p className="font-semibold text-foreground">In-Browser WebGPU</p>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        Runs on 0.5GB RAM with anti-repetition protection.
+                        Runs directly in browser tab with private on-device execution.
                       </p>
                     </div>
                     <div className="rounded-xl border border-border/70 bg-card p-3">
