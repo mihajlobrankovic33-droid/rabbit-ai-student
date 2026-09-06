@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import type { ChatMessage, StudyContent } from "@/types/study";
+import type { AnimalTeacher, ChatMessage, StudyContent } from "@/types/study";
 import { generateChatResponse, generateStudyNotes } from "@/services/study/aiService";
 
 const API_KEY_STORAGE = "study_buddy_gemini_key";
@@ -25,7 +25,11 @@ export function useStudyAI() {
   }, []);
 
   const chatWithAI = useCallback(
-    async (message: string, history: ChatMessage[] = []): Promise<string> => {
+    async (
+      message: string,
+      history: ChatMessage[] = [],
+      animalTeacher?: AnimalTeacher
+    ): Promise<string> => {
       // Abort any existing running query first
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -41,7 +45,8 @@ export function useStudyAI() {
           message,
           history,
           apiKey,
-          controller.signal
+          controller.signal,
+          animalTeacher
         );
         return response;
       } finally {

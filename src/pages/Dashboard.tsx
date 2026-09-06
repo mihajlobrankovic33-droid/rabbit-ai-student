@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ChatView } from "@/components/study/ChatView";
+import { ClassroomView } from "@/components/study/ClassroomView";
 import { GenerateForm } from "@/components/study/GenerateForm";
 import { GeneratedContent } from "@/components/study/GeneratedContent";
 import { MarketView } from "@/components/study/MarketView";
@@ -10,7 +11,7 @@ import { UserProfileModal } from "@/components/study/UserProfileModal";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useStudyAI } from "@/hooks/use-study-ai";
-import { useI18n, SUPPORTED_LANGUAGES } from "@/services/study/i18n";
+import { useI18n } from "@/services/study/i18n";
 import {
   deleteChatSession,
   deleteNote,
@@ -24,7 +25,6 @@ import type { ChatMessage, ChatSession, Note, StudyContent } from "@/types/study
 import {
   BookOpen,
   Cpu,
-  Flame,
   GraduationCap,
   Menu,
   MessageSquare,
@@ -46,9 +46,9 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { generateNotes } = useStudyAI();
-  const { lang, t } = useI18n();
+  const { t } = useI18n();
 
-  const [activeView, setActiveView] = useState<"chat" | "notes" | "market" | "library">("chat");
+  const [activeView, setActiveView] = useState<"chat" | "classroom" | "notes" | "market" | "library">("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -284,21 +284,12 @@ export default function Dashboard() {
     [activeSessionId, currentUserId, handleNewChat, refreshSessions]
   );
 
-  const displayName = user?.name || user?.email || "Student";
-  const initials = displayName
-    .split(/\s+/)
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-  const currentLangInfo = SUPPORTED_LANGUAGES.find((l) => l.code === lang);
-
   return (
     <div className="min-h-screen bg-background text-foreground selection:bg-primary/20 selection:text-primary flex flex-col">
-      {/* Top Header Bar: Left Top Logo, Chat & Notes & Market Buttons, Left Side User Account, Right Top Model & Hamburger */}
+      {/* Top Header Bar: Left Top Logo, Chat & Notes & Market Buttons, Right Top Model & Hamburger */}
       <header className="sticky top-0 z-40 border-b border-border/80 bg-background/95 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-3 sm:px-6">
-          {/* Left Side: Brand Logo, Top-Left Chat, Notes & Market Buttons, and User Account */}
+          {/* Left Side: Brand Logo, Top-Left Chat, Notes & Market Buttons */}
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             {/* Logo */}
             <button
@@ -314,7 +305,7 @@ export default function Dashboard() {
 
             <div className="h-6 w-px bg-border/80 hidden sm:block" />
 
-            {/* Top Navigation Buttons: Chat, Notes, and Market */}
+            {/* Top Navigation Buttons: Chat, Učionica, Notes, and Market */}
             <div className="flex items-center gap-1 rounded-2xl bg-muted/60 p-1 border border-border/60 shadow-2xs">
               <button
                 type="button"
@@ -327,6 +318,20 @@ export default function Dashboard() {
               >
                 <MessageSquare className="h-3.5 w-3.5" />
                 <span>Chat</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveView("classroom")}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-extrabold transition-all ${
+                  activeView === "classroom"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                }`}
+                title="Slatki životinjski nastavnici te ispituju pred tablom"
+              >
+                <span className="text-xs">🐾</span>
+                <span>Učionica</span>
               </button>
 
               <button
@@ -355,63 +360,10 @@ export default function Dashboard() {
                 <span>Market</span>
               </button>
             </div>
-
-            <div className="h-6 w-px bg-border/80 hidden lg:block" />
-
-            {/* Left Side: User Account Badge */}
-            <button
-              type="button"
-              onClick={() => setProfileOpen(true)}
-              title="Klikni da promeniš ime ili profilnu sliku"
-              className="hidden lg:flex cursor-pointer items-center gap-2.5 rounded-2xl border border-border/70 bg-card/70 px-3 py-1.5 text-left transition-all hover:border-primary/50 hover:bg-primary/5 shadow-2xs group"
-            >
-              {user?.avatar && !user.avatar.startsWith("data:") && user.avatar.length <= 4 ? (
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-sm ring-1 ring-primary/30">
-                  {user.avatar}
-                </span>
-              ) : user?.avatar ? (
-                <img
-                  src={user.avatar}
-                  alt={displayName}
-                  className="h-7 w-7 shrink-0 rounded-xl object-cover ring-1 ring-primary/30"
-                />
-              ) : (
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-xs font-extrabold text-primary">
-                  {initials || "S"}
-                </span>
-              )}
-              <div className="min-w-0">
-                <p className="truncate text-xs font-bold text-foreground leading-tight max-w-[120px] group-hover:text-primary transition-colors">
-                  {displayName}
-                </p>
-                <p className="truncate text-[10px] text-muted-foreground flex items-center gap-1 leading-tight">
-                  <Flame className="h-2.5 w-2.5 text-amber-500" /> {t("activeStudent")} • {currentLangInfo?.flag || "🇷🇸"}
-                </p>
-              </div>
-            </button>
           </div>
 
-          {/* Right Side Controls: Mobile Profile Avatar, AI Model Engine Status + Hamburger Menu Button */}
+          {/* Right Side Controls: AI Model Engine Status + Hamburger Menu Button */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Mobile Profile Trigger Avatar */}
-            <button
-              type="button"
-              onClick={() => setProfileOpen(true)}
-              title="Moj Profil (Ime & Slika)"
-              className="flex lg:hidden cursor-pointer items-center justify-center h-8 w-8 rounded-xl border border-border/70 bg-card transition-all hover:border-primary/50 hover:bg-primary/10"
-            >
-              {user?.avatar && !user.avatar.startsWith("data:") && user.avatar.length <= 4 ? (
-                <span className="text-sm">{user.avatar}</span>
-              ) : user?.avatar ? (
-                <img
-                  src={user.avatar}
-                  alt={displayName}
-                  className="h-7 w-7 rounded-lg object-cover"
-                />
-              ) : (
-                <span className="text-xs font-bold text-primary">{initials || "S"}</span>
-              )}
-            </button>
             {/* AI Model indicator */}
             <div
               onClick={() => setSettingsOpen(true)}
@@ -453,6 +405,22 @@ export default function Dashboard() {
               onSaveSession={handleSaveSession}
               onOpenSettings={() => setSettingsOpen(true)}
               onOpenHamburger={() => setHamburgerOpen(true)}
+              onSwitchToClassroom={() => setActiveView("classroom")}
+            />
+          </div>
+        )}
+
+        {/* View 1.5: Animal Teacher Interactive Classroom (Oral Examination) */}
+        {activeView === "classroom" && (
+          <div className="animate-in fade-in duration-300">
+            <ClassroomView
+              onOpenNotes={() => setActiveView("notes")}
+              onOpenChat={(prompt) => {
+                if (prompt) {
+                  handleNewChat();
+                }
+                setActiveView("chat");
+              }}
             />
           </div>
         )}
@@ -592,6 +560,19 @@ export default function Dashboard() {
 
           <button
             type="button"
+            onClick={() => setActiveView("classroom")}
+            className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
+              activeView === "classroom"
+                ? "text-primary font-bold"
+                : "text-muted-foreground hover:text-foreground font-medium"
+            }`}
+          >
+            <span className={`text-lg leading-none ${activeView === "classroom" ? "scale-110" : ""}`}>🐾</span>
+            <span className="text-[10px] mt-0.5">Učionica</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveView("notes")}
             className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
               activeView === "notes"
@@ -662,6 +643,7 @@ export default function Dashboard() {
         onSelectNote={handleSelectNote}
         onDeleteNote={handleDeleteNote}
         onOpenNotesTab={() => setActiveView("notes")}
+        onOpenClassroomTab={() => setActiveView("classroom")}
         onOpenMarketTab={() => setActiveView("market")}
         onOpenLibraryTab={() => setActiveView("library")}
         timerSeconds={timerSeconds}

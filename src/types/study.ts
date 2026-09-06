@@ -72,3 +72,64 @@ export interface MarketNote {
   createdAt: string;
   comments?: MarketComment[];
 }
+
+export type AnimalTeacherId = "fox" | "rabbit" | "panda" | "cat" | "owl" | "dog";
+
+export interface AnimalTeacher {
+  id: AnimalTeacherId;
+  name: string;
+  title: string;
+  species: string;
+  emoji: string;
+  badge: string;
+  personality: string;
+  teachingStyle: string;
+  greetingSr: string;
+  greetingEn: string;
+  catchphraseSr: string;
+  catchphraseEn: string;
+  rewardItem: string;
+  rewardIcon: string;
+  avatarBg: string;
+  accentColor: string;
+  voicePitch: number;
+  voiceRate: number;
+}
+
+export interface ClassroomTurn {
+  id: string;
+  questionNumber: number;
+  teacherQuestion: string;
+  studentAnswer?: string;
+  teacherFeedback?: string;
+  score?: number; // 0 - 100
+  grade?: string;
+  isCorrect?: boolean;
+  animalReaction?: string;
+  rewardEarned?: boolean;
+  hintUsed?: boolean;
+  hintText?: string;
+  createdAt: string;
+}
+
+export interface ClassroomSession {
+  id: string;
+  teacherId: AnimalTeacherId;
+  subject: string;
+  topic: string;
+  mode: "oral_exam" | "pop_quiz" | "interactive_lesson" | "deep_drill";
+  turns: ClassroomTurn[];
+  currentTurnIndex: number;
+  totalQuestions: number;
+  status: "setup" | "active" | "completed";
+  finalGrade?: string;
+  averageScore?: number;
+  finalVerdict?: string;
+  keyStrengths?: string[];
+  topicsToReview?: string[];
+  rewardsCount: number;
+  startedAt: string;
+  completedAt?: string;
+  userId?: string;
+}
+

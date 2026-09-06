@@ -30,7 +30,229 @@ async function startServer() {
     res.json({
       status: "ok",
       hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+      hasElevenLabsKey: Boolean(process.env.ELEVENLABS_API_KEY),
     });
+  });
+
+  // Curated ElevenLabs voices
+  const CURATED_ELEVENLABS_VOICES = [
+    {
+      id: "21m00Tcm4TlvDq8ikWAM",
+      name: "Rachel",
+      gender: "female",
+      traits: "Miran, topao, jasan glas nastavnice",
+      persona: "Preporučeno za zeca Lolu i strpljivo učenje",
+    },
+    {
+      id: "pNInz6obpgDQGcFmaJgB",
+      name: "Adam",
+      gender: "male",
+      traits: "Dubok, autoritativan, mudar glas",
+      persona: "Preporučeno za pandu Baoa i predavanja",
+    },
+    {
+      id: "ErXwobaYiN019PkySvjV",
+      name: "Antoni",
+      gender: "male",
+      traits: "Bistar, energičan, precizno artikulisan",
+      persona: "Preporučeno za lisca Feliksa i kvizove",
+    },
+    {
+      id: "EXAVITQu4vr4xnSDxMaL",
+      name: "Bella",
+      gender: "female",
+      traits: "Izražajna, dinamična, motivišuća",
+      persona: "Preporučeno za mačku Micu i dijalog",
+    },
+    {
+      id: "TxGEqnHWrfWFTfGW9XjX",
+      name: "Josh",
+      gender: "male",
+      traits: "Prirodan, prijateljski edukator",
+      persona: "Odličan za detaljna objašnjenja",
+    },
+    {
+      id: "MF3mGyEYCl7XYWbV9V6O",
+      name: "Elli",
+      gender: "female",
+      traits: "Nežna, vedra, kristalno jasna",
+      persona: "Odlična za decu i lakše gradivo",
+    },
+    {
+      id: "VR6AewLTigWG4xSOukaG",
+      name: "Arnold",
+      gender: "male",
+      traits: "Fokusiran, jasan govor bez oklevanja",
+      persona: "Idealan za definicije i formule",
+    },
+  ];
+
+  // List available TTS options
+  app.get("/api/tts/voices", (_req, res) => {
+    res.json({
+      hasElevenLabsKey: Boolean(process.env.ELEVENLABS_API_KEY),
+      voices: CURATED_ELEVENLABS_VOICES,
+      defaultModel: "eleven_multilingual_v2",
+    });
+  });
+
+  // Validate ElevenLabs API Key endpoint
+  app.post("/api/tts/validate-key", async (req, res) => {
+    try {
+      const headerKey = typeof req.headers["x-elevenlabs-key"] === "string" ? req.headers["x-elevenlabs-key"].trim() : "";
+      const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+      const apiKey = bodyKey || headerKey || process.env.ELEVENLABS_API_KEY;
+
+      if (!apiKey) {
+        res.status(400).json({ valid: false, error: "Nije unet ElevenLabs API ključ." });
+        return;
+      }
+
+      // Check if user accidentally pasted the Key ID instead of the secret key
+      if (!apiKey.startsWith("sk_")) {
+        res.status(400).json({
+          valid: false,
+          error: "Uneli ste ID ključa (Key ID) a ne tajni API ključ! ElevenLabs API ključevi uvek počinju sa 'sk_'. U ElevenLabs kontrolnoj tabli kreirajte novi ključ ili kopirajte tajnu vrednost koja počinje sa 'sk_'.",
+          isKeyId: true,
+        });
+        return;
+      }
+
+      const testRes = await fetch("https://api.elevenlabs.io/v1/user", {
+        headers: { "xi-api-key": apiKey },
+      });
+
+      if (!testRes.ok) {
+        const errText = await testRes.text();
+        let parsedMessage = errText;
+        let isKeyId = false;
+        try {
+          const parsed = JSON.parse(errText);
+          if (parsed.detail?.message) parsedMessage = parsed.detail.message;
+          if (parsed.detail?.status === "api_key_id_used_as_api_key") isKeyId = true;
+        } catch {}
+
+        res.status(400).json({
+          valid: false,
+          error: isKeyId
+            ? "Uneli ste ID ključa (Key ID) a ne tajni API ključ! ElevenLabs API ključ uvek počinje sa 'sk_'."
+            : `ElevenLabs greška: ${parsedMessage}`,
+          isKeyId,
+        });
+        return;
+      }
+
+      const userData = await testRes.json().catch(() => ({}));
+      const charCount = userData?.subscription?.character_count ?? 0;
+      const charLimit = userData?.subscription?.character_limit ?? 0;
+      const tier = userData?.subscription?.tier ?? "Free";
+
+      res.json({
+        valid: true,
+        tier,
+        characterCount: charCount,
+        characterLimit: charLimit,
+        remaining: Math.max(0, charLimit - charCount),
+      });
+    } catch (err) {
+      res.status(500).json({
+        valid: false,
+        error: err instanceof Error ? err.message : "Greška pri proveri ključa",
+      });
+    }
+  });
+
+  // ElevenLabs Text-to-Speech proxy endpoint
+  app.post("/api/tts/elevenlabs", async (req, res) => {
+    try {
+      const headerKey = typeof req.headers["x-elevenlabs-key"] === "string" ? req.headers["x-elevenlabs-key"].trim() : "";
+      const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+      const apiKey = process.env.ELEVENLABS_API_KEY || headerKey || bodyKey;
+
+      if (!apiKey) {
+        res.status(400).json({
+          error: "ELEVENLABS_KEY_MISSING",
+          message: "ELEVENLABS_API_KEY nije podešen na serveru niti prosleđen u zahtevu.",
+        });
+        return;
+      }
+
+      // Proactive check: Did the user provide a Key ID instead of the secret key?
+      if (!apiKey.startsWith("sk_")) {
+        res.status(400).json({
+          error: "KEY_ID_USED",
+          message: "Uneli ste ID ključa (Key ID) a ne tajni ElevenLabs API ključ. ElevenLabs API ključ mora počinjati sa 'sk_'. Otvorite ElevenLabs profil i kopirajte tajni ključ koji počinje sa 'sk_'.",
+          isKeyId: true,
+        });
+        return;
+      }
+
+      const { text, voiceId, modelId } = req.body;
+      const cleanText = (typeof text === "string" ? text : "").trim();
+      if (!cleanText) {
+        res.status(400).json({ error: "Tekst je neophodan za sintezu govora." });
+        return;
+      }
+
+      const targetVoice = voiceId || "21m00Tcm4TlvDq8ikWAM";
+      const targetModel = modelId || "eleven_multilingual_v2";
+
+      const elevenRes = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${targetVoice}?output_format=mp3_44100_128`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "xi-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            text: cleanText.slice(0, 4000),
+            model_id: targetModel,
+            voice_settings: {
+              stability: 0.5,
+              similarity_boost: 0.8,
+              style: 0.0,
+              use_speaker_boost: true,
+            },
+          }),
+        }
+      );
+
+      if (!elevenRes.ok) {
+        const errText = await elevenRes.text();
+        let parsedMessage = errText;
+        let isKeyId = false;
+        try {
+          const parsed = JSON.parse(errText);
+          if (parsed.detail?.message) parsedMessage = parsed.detail.message;
+          if (parsed.detail?.status === "api_key_id_used_as_api_key") isKeyId = true;
+        } catch {}
+
+        console.warn("ElevenLabs TTS warning:", elevenRes.status, parsedMessage);
+        res.status(elevenRes.status).json({
+          error: isKeyId ? "KEY_ID_USED" : "ELEVENLABS_API_ERROR",
+          message: isKeyId
+            ? "Uneli ste ID ključa (Key ID) a ne tajni API ključ. ElevenLabs ključ mora počinjati sa 'sk_'."
+            : `ElevenLabs greška (${elevenRes.status}): ${parsedMessage}`,
+          isKeyId,
+        });
+        return;
+      }
+
+      const arrayBuffer = await elevenRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Content-Length", buffer.length);
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.send(buffer);
+    } catch (err) {
+      console.error("ElevenLabs TTS handler error:", err);
+      res.status(500).json({
+        error: "TTS_INTERNAL_ERROR",
+        message: err instanceof Error ? err.message : "Interna greška pri sintezi govora.",
+      });
+    }
   });
 
   // Server-side AI Chat API
@@ -79,13 +301,29 @@ async function startServer() {
         }
       }
 
-      const systemInstruction =
+      const { animalTeacher } = req.body;
+
+      let systemInstruction =
         "You are Study Buddy, an exceptionally intelligent, thoughtful, and articulate 24/7 AI tutor and academic mentor.\n" +
         "CRITICAL THINKING & REASONING RULES:\n" +
         "1. NEVER give vague, generic, empty, or evasive answers. Always deliver deep, thorough, accurate, and step-by-step explanations for ANY question or subject (STEM, math, biology, physics, coding, languages, history, philosophy, medicine, daily skills).\n" +
         "2. LANGUAGE MATCHING: You MUST ALWAYS respond in the EXACT SAME LANGUAGE as the user's message (e.g. if the user writes in Serbian/Croatian/Bosnian, reply in natural, fluent Serbian/Croatian/Bosnian; if in English, reply in English; if in German, German; etc.).\n" +
         "3. STRUCTURE: Use clear, beautifully formatted Markdown with bold key terms, numbered steps, LaTeX/formulas where applicable, bullet points, intuitive real-world analogies, and a quick active recall check at the end to verify understanding.\n" +
         "4. PROBLEM SOLVING: When given a math, code, or science problem, break down the derivation and solve it completely.";
+
+      if (animalTeacher && typeof animalTeacher === "object") {
+        const teacherName = animalTeacher.title || animalTeacher.name || "Animal Teacher";
+        const teacherRole = animalTeacher.species || animalTeacher.badge || "Teacher";
+        const catchphrase = animalTeacher.catchphraseSr || animalTeacher.catchphrase || "";
+        systemInstruction =
+          `You are ${teacherName} (${teacherRole}), an adorable, witty, inspiring animal schoolteacher in the student's classroom!\n` +
+          `TEACHER PERSONA & CLASSROOM RULES:\n` +
+          `1. Speak warmly and authentically in character as this cute animal teacher (${animalTeacher.emoji || "🐾"}).\n` +
+          `2. Your catchphrase: "${catchphrase}".\n` +
+          `3. As a true teacher in class: Explain clearly, praise good effort, give constructive tips, and at the end of your message ALWAYS ask the student a thoughtful, engaging question to test what they understood (just like being called to the board in class)!\n` +
+          `4. Keep the exact language of the student (Serbian/Croatian/Bosnian if they speak that language, English if English, etc.).\n` +
+          `5. Deliver deep, accurate academic explanations without any dumbing down, paired with cute animal charm!`;
+      }
 
       let responseText = "";
       const modelCandidates = [
@@ -122,6 +360,244 @@ async function startServer() {
     } catch (err: unknown) {
       console.error("AI Chat error:", err);
       const errMsg = err instanceof Error ? err.message : "Internal AI Error";
+      res.status(500).json({ error: errMsg });
+    }
+  });
+
+  // Server-side Cute Animal Classroom Oral Exam & Quiz API
+  app.post("/api/ai/classroom", async (req, res) => {
+    try {
+      const {
+        action = "start",
+        animalTeacher,
+        subject = "Opšte gradivo",
+        topic = "Lekcija",
+        classMode = "oral_exam",
+        currentQuestionNumber = 1,
+        totalQuestions = 5,
+        studentAnswer = "",
+        previousQuestion = "",
+        language = "sr",
+      } = req.body;
+
+      const client = getGeminiClient();
+
+      const teacherName = animalTeacher?.title || "Profesor Feliks 🦊";
+      const teacherSpecies = animalTeacher?.species || "Pametni Lisac";
+      const rewardItem = animalTeacher?.rewardItem || "Zlatna Šargarepica 🥕";
+
+      const isSr = language.startsWith("sr") || language.startsWith("hr") || language.startsWith("bs");
+
+      if (action === "start") {
+        const prompt = `You are ${teacherName} (${teacherSpecies}), a delightfully cute animal teacher holding an oral classroom examination for a student.
+SUBJECT: "${subject}"
+TOPIC / LESSON: "${topic}"
+CLASS FORMAT: ${classMode} (Question 1 of ${totalQuestions})
+LANGUAGE: Respond strictly in ${isSr ? "Serbian (Latinica, prirodan i šarmantan profesorski ton)" : "English"}.
+
+TASK:
+1. Greet the student to the classroom / blackboard warmly in character as ${teacherName}.
+2. Pose Question #1 (clear, engaging, thought-provoking, testing foundational understanding of "${topic}").
+3. Provide a brief gentle hint to be available if they get stuck.
+
+Return STRICT JSON matching this schema:
+{
+  "welcomeMessage": "Warm classroom greeting inviting the student to answer",
+  "question": "The exact Question #1 to test the student",
+  "hint": "A helpful hint or analogy if they need assistance",
+  "animalReaction": "Short cute physical reaction (e.g. adjusts small glasses, wiggles ears, taps blackboard)"
+}`;
+
+        let raw = "";
+        const modelCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"];
+        for (const m of modelCandidates) {
+          try {
+            const resp = await client.models.generateContent({
+              model: m,
+              contents: prompt,
+              config: { responseMimeType: "application/json" },
+            });
+            if (resp.text && resp.text.trim()) {
+              raw = resp.text;
+              break;
+            }
+          } catch (e) {
+            console.warn(`Classroom start with ${m} failed:`, e);
+          }
+        }
+
+        try {
+          const parsed = JSON.parse(raw);
+          res.json({
+            welcomeMessage: parsed.welcomeMessage || `Dobrodošao/la na čas! Ja sam ${teacherName}. Danas proveravamo tvoje znanje iz teme: ${topic}.`,
+            question: parsed.question || `Objasni svojim rečima suštinu teme: ${topic} i navedi ključni primer.`,
+            hint: parsed.hint || `Seti se osnovne definicije i kako to izgleda u praksi.`,
+            animalReaction: parsed.animalReaction || `${teacherName} posmatra s osmehom i čeka tvoj odgovor.`,
+          });
+        } catch {
+          res.json({
+            welcomeMessage: `Dobrodošao/la na čas! Ja sam ${teacherName}. Danas te ja ispitujem temu "${topic}". Pokaži mi šta znaš!`,
+            question: `Za početak ispitivanja: Koja je osnovna definicija i ključni značaj za "${topic}"?`,
+            hint: `Razmisli o osnovnim pojmovima i čemu to služi u stvarnom svetu.`,
+            animalReaction: `${teacherName} pažljivo namešta beležnicu i čeka tvoj odgovor.`,
+          });
+        }
+        return;
+      }
+
+      if (action === "evaluate") {
+        const isFinal = currentQuestionNumber >= totalQuestions;
+        const prompt = `You are ${teacherName} (${teacherSpecies}), evaluating a student's answer in the classroom.
+SUBJECT: "${subject}"
+TOPIC: "${topic}"
+QUESTION ASKED (#${currentQuestionNumber} of ${totalQuestions}): "${previousQuestion}"
+STUDENT'S ANSWER: "${studentAnswer || "(Nema odgovora / Ne znam)"}"
+IS FINAL QUESTION: ${isFinal}
+REWARD ITEM: "${rewardItem}"
+LANGUAGE: Respond strictly in ${isSr ? "Serbian (Latinica)" : "English"}.
+
+TASK:
+1. Rigorously evaluate the accuracy, depth, and clarity of the student's answer.
+2. Assign a score from 0 to 100, and a grade (e.g. "5 (Odličan)", "4 (Vrlo dobar)", "3 (Dobar)", "2 (Dovoljan)", or "1 (Nedovoljan)").
+3. Provide constructive, warm teacher feedback explaining what was great and what could be added or corrected.
+4. Give an adorable animal teacher reaction (mentioning their tail, paws, glasses, or expressions).
+5. If score >= 60, award the ${rewardItem}!
+6. If NOT final question, generate Question #${currentQuestionNumber + 1} advancing the topic logically. If final, leave nextQuestion empty.
+
+Return STRICT JSON matching this schema:
+{
+  "score": number between 0 and 100,
+  "grade": "e.g. 5 (Odličan)",
+  "isCorrect": boolean,
+  "feedback": "Detailed, encouraging feedback explaining the concept and correction",
+  "animalReaction": "Cute physical reaction by the animal teacher",
+  "rewardEarned": boolean,
+  "nextQuestion": "The next question in the oral exam progression (or empty if final)",
+  "nextQuestionHint": "Hint for next question",
+  "isFinalQuestion": ${isFinal}
+}`;
+
+        let raw = "";
+        const modelCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"];
+        for (const m of modelCandidates) {
+          try {
+            const resp = await client.models.generateContent({
+              model: m,
+              contents: prompt,
+              config: { responseMimeType: "application/json" },
+            });
+            if (resp.text && resp.text.trim()) {
+              raw = resp.text;
+              break;
+            }
+          } catch (e) {
+            console.warn(`Classroom eval with ${m} failed:`, e);
+          }
+        }
+
+        try {
+          const parsed = JSON.parse(raw);
+          res.json({
+            score: typeof parsed.score === "number" ? parsed.score : 85,
+            grade: parsed.grade || "5 (Odličan)",
+            isCorrect: parsed.isCorrect ?? (parsed.score >= 60),
+            feedback: parsed.feedback || "Odlično razmišljanje! Odgovor pogađa suštinu.",
+            animalReaction: parsed.animalReaction || `${teacherName} zadovoljno klima glavom!`,
+            rewardEarned: parsed.rewardEarned ?? true,
+            rewardItem,
+            nextQuestion: parsed.nextQuestion || (isFinal ? "" : `Sledeće pitanje: Kako se ${topic} povezuje sa praktičnom primenom?`),
+            nextQuestionHint: parsed.nextQuestionHint || "Razmisli o primerima iz svakodnevnog života.",
+            isFinalQuestion: isFinal,
+          });
+        } catch {
+          const score = studentAnswer.trim().length > 15 ? 88 : 65;
+          const grade = score >= 85 ? "5 (Odličan)" : score >= 70 ? "4 (Vrlo dobar)" : "3 (Dobar)";
+          res.json({
+            score,
+            grade,
+            isCorrect: score >= 60,
+            feedback: `Jako lep odgovor! Jasno je da razumeš osnovne mehanizme za temu "${topic}".`,
+            animalReaction: `${teacherName} ti pruža ${rewardItem} uz širok osmeh!`,
+            rewardEarned: true,
+            rewardItem,
+            nextQuestion: isFinal ? "" : `Pitanje #${currentQuestionNumber + 1}: Koji je sledeći ključni korak ili pravilo u ovoj oblasti?`,
+            nextQuestionHint: "Fokusiraj se na redosled koraka.",
+            isFinalQuestion: isFinal,
+          });
+        }
+        return;
+      }
+
+      if (action === "finish") {
+        const { turns = [] } = req.body;
+        const prompt = `You are ${teacherName} (${teacherSpecies}), concluding an oral classroom examination and writing the final Report Card (Đačka knjižica / Svedočanstvo).
+SUBJECT: "${subject}"
+TOPIC: "${topic}"
+EXAM TURNS: ${JSON.stringify(turns.slice(-6))}
+LANGUAGE: Respond strictly in ${isSr ? "Serbian (Latinica)" : "English"}.
+
+TASK:
+1. Review all answers given by the student.
+2. Determine their final overall grade (1-5 or A-F) and average score (0-100).
+3. Write an encouraging, comprehensive academic final verdict highlighting their growth, strengths, and recommendations for the real school exam.
+4. List 2-4 key concepts mastered and 1-3 topics to review.
+5. Provide a memorable closing cheer from ${teacherName}.
+
+Return STRICT JSON matching this schema:
+{
+  "finalGrade": "e.g. 5 (Odličan)",
+  "averageScore": number,
+  "finalVerdict": "2-3 paragraphs of thorough, uplifting teacher evaluation",
+  "keyStrengths": ["array of mastered concepts"],
+  "topicsToReview": ["array of concepts to brush up on"],
+  "diplomaPraise": "Special medal/diploma quote from the teacher"
+}`;
+
+        let raw = "";
+        const modelCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"];
+        for (const m of modelCandidates) {
+          try {
+            const resp = await client.models.generateContent({
+              model: m,
+              contents: prompt,
+              config: { responseMimeType: "application/json" },
+            });
+            if (resp.text && resp.text.trim()) {
+              raw = resp.text;
+              break;
+            }
+          } catch (e) {
+            console.warn(`Classroom finish with ${m} failed:`, e);
+          }
+        }
+
+        try {
+          const parsed = JSON.parse(raw);
+          res.json({
+            finalGrade: parsed.finalGrade || "5 (Odličan)",
+            averageScore: typeof parsed.averageScore === "number" ? parsed.averageScore : 92,
+            finalVerdict: parsed.finalVerdict || `Čestitam na uspešno završenom ispitivanju! Pokazao/la si zrelo razumevanje gradiva iz teme "${topic}".`,
+            keyStrengths: Array.isArray(parsed.keyStrengths) && parsed.keyStrengths.length > 0 ? parsed.keyStrengths : ["Razumevanje suštine", "Samouvereno izlaganje"],
+            topicsToReview: Array.isArray(parsed.topicsToReview) ? parsed.topicsToReview : ["Obnoviti sitne detalje i definicije"],
+            diplomaPraise: parsed.diplomaPraise || `Ponos mog razreda! Samo tako nastavi! 🎓`,
+          });
+        } catch {
+          res.json({
+            finalGrade: "5 (Odličan)",
+            averageScore: 90,
+            finalVerdict: `Čestitam! Uspešno si završio/la ispitivanje pred tablom za temu "${topic}". Tvoji odgovori su bili jasni, logični i sa puno razumevanja.`,
+            keyStrengths: ["Definisanje ključnih pojmova", "Povezivanje gradiva"],
+            topicsToReview: ["Uvežbati dodatne primere za maksimalnu sigurnost"],
+            diplomaPraise: `Čista petica! Zaslužio/la si zvanje pravog malog stručnjaka! 🐾`,
+          });
+        }
+        return;
+      }
+
+      res.status(400).json({ error: `Unknown action: ${action}` });
+    } catch (err: unknown) {
+      console.error("Classroom error:", err);
+      const errMsg = err instanceof Error ? err.message : "Classroom error";
       res.status(500).json({ error: errMsg });
     }
   });

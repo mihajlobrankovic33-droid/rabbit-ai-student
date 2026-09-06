@@ -1,6 +1,6 @@
 {
   "name": "Study Buddy",
   "description": "An AI-powered study assistant with conversational explanations, structured notes generation, and offline support.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

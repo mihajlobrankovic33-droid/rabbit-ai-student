@@ -1,4 +1,4 @@
-import type { ChatMessage, StudyContent } from "@/types/study";
+import type { AnimalTeacher, ChatMessage, StudyContent } from "@/types/study";
 import {
   generateInBrowserChat,
   generateInBrowserStudyNotes,
@@ -37,11 +37,16 @@ export function setSelectedAIProvider(provider: AIProvider): void {
 /**
  * Sends chat message to the server-side AI endpoint
  */
-async function callServerChat(message: string, history: ChatMessage[] = [], signal?: AbortSignal): Promise<string> {
+async function callServerChat(
+  message: string,
+  history: ChatMessage[] = [],
+  signal?: AbortSignal,
+  animalTeacher?: AnimalTeacher
+): Promise<string> {
   const res = await fetch("/api/ai/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({ message, history, animalTeacher }),
     signal,
   });
 
@@ -85,7 +90,8 @@ export async function generateChatResponse(
   message: string,
   history: ChatMessage[] = [],
   _customApiKey?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  animalTeacher?: AnimalTeacher
 ): Promise<string> {
   const clean = message.trim();
   const lower = clean.toLowerCase();
@@ -94,7 +100,7 @@ export async function generateChatResponse(
   // 1. If user chose Gemini Cloud AI (Primary / Deep Thinking)
   if (provider === "gemini") {
     try {
-      const reply = await callServerChat(clean, history, signal);
+      const reply = await callServerChat(clean, history, signal, animalTeacher);
       if (reply && reply.trim().length > 0) {
         return reply;
       }
@@ -130,7 +136,7 @@ export async function generateChatResponse(
 
     // Seamlessly answer with server AI
     try {
-      const reply = await callServerChat(clean, history, signal);
+      const reply = await callServerChat(clean, history, signal, animalTeacher);
       if (reply && reply.trim().length > 0) {
         return reply;
       }
@@ -141,7 +147,7 @@ export async function generateChatResponse(
 
   // 4. Default fallback: Server AI Brain
   try {
-    const reply = await callServerChat(clean, history, signal);
+    const reply = await callServerChat(clean, history, signal, animalTeacher);
     if (reply && reply.trim().length > 0) {
       return reply;
     }

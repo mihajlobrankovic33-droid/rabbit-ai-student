@@ -66,6 +66,7 @@ interface HamburgerMenuProps {
   onSelectNote?: (note: Note) => void;
   onDeleteNote?: (id: string) => void;
   onOpenNotesTab?: () => void;
+  onOpenClassroomTab?: () => void;
   onOpenLibraryTab?: () => void;
   onOpenMarketTab?: () => void;
   // Focus Timer
@@ -91,6 +92,7 @@ export function HamburgerMenu({
   onSelectNote,
   onDeleteNote,
   onOpenNotesTab,
+  onOpenClassroomTab,
   onOpenLibraryTab,
   onOpenMarketTab,
   timerSeconds = 25 * 60,
@@ -333,6 +335,20 @@ export function HamburgerMenu({
                 </span>
               </div>
               <div className="flex items-center gap-1">
+                {onOpenClassroomTab && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenClassroomTab();
+                      onClose();
+                    }}
+                    className="flex cursor-pointer items-center gap-1 rounded-xl bg-card border border-border/70 px-2 py-1 text-xs font-bold text-foreground transition-all hover:bg-muted hover:text-primary"
+                    title="Učionica sa životinjskim nastavnicima"
+                  >
+                    <span>🐾</span>
+                    <span>Učionica</span>
+                  </button>
+                )}
                 {onOpenNotesTab && (
                   <button
                     type="button"
@@ -649,24 +665,43 @@ export function HamburgerMenu({
 
         {/* User Profile & Log Out in Hamburger */}
         <div className="mt-6 border-t border-border/60 pt-4 space-y-2.5">
-          <div className="flex items-center gap-3 rounded-2xl bg-muted/40 p-3 border border-border/60">
-            {user?.avatar && !user.avatar.startsWith("data:") && user.avatar.length <= 4 ? (
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-2xl ring-2 ring-primary/25">
-                {user.avatar}
-              </span>
-            ) : user?.avatar ? (
-              <img
-                src={user.avatar}
-                alt={displayName}
-                className="h-11 w-11 shrink-0 rounded-2xl object-cover ring-2 ring-primary/25 shadow-xs"
-              />
-            ) : (
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/20 text-sm font-black text-primary ring-2 ring-primary/25">
-                {initials || "S"}
-              </span>
-            )}
+          <div
+            onClick={() => {
+              if (onOpenProfile) {
+                onClose();
+                onOpenProfile();
+              }
+            }}
+            className={`flex items-center gap-3 rounded-2xl bg-muted/40 p-3 border border-border/60 transition-all ${
+              onOpenProfile ? "cursor-pointer hover:border-primary/50 hover:bg-primary/5 group" : ""
+            }`}
+          >
+            <div className="relative">
+              {user?.avatar && !user.avatar.startsWith("data:") && user.avatar.length <= 4 ? (
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-2xl ring-2 ring-primary/25">
+                  {user.avatar}
+                </span>
+              ) : user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={displayName}
+                  className="h-11 w-11 shrink-0 rounded-2xl object-cover ring-2 ring-primary/25 shadow-xs"
+                />
+              ) : (
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/20 text-sm font-black text-primary ring-2 ring-primary/25">
+                  {initials || "S"}
+                </span>
+              )}
+              {onOpenProfile && (
+                <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xs">
+                  <Edit3 className="h-2.5 w-2.5" />
+                </span>
+              )}
+            </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-bold text-foreground">{displayName}</p>
+              <p className="truncate text-xs font-bold text-foreground group-hover:text-primary transition-colors">
+                {displayName}
+              </p>
               <p className="truncate text-[10px] text-muted-foreground flex items-center gap-1">
                 <Flame className="h-3 w-3 text-amber-500" /> {t("activeStudent")}
               </p>
@@ -674,15 +709,16 @@ export function HamburgerMenu({
             {onOpenProfile && (
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   onClose();
                   onOpenProfile();
                 }}
-                className="flex cursor-pointer items-center gap-1 rounded-xl bg-primary/10 px-2.5 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/20"
-                title="Promeni ime ili profilnu sliku"
+                className="flex cursor-pointer items-center gap-1.5 rounded-xl bg-primary/15 px-2.5 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/25 shadow-2xs"
+                title="Promeni sliku ili ime"
               >
                 <Edit3 className="h-3.5 w-3.5" />
-                <span>Uredi</span>
+                <span>Promeni</span>
               </button>
             )}
           </div>
