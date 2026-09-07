@@ -28,6 +28,7 @@ import {
   Trash2,
   Loader2,
   ExternalLink,
+  Sliders,
 } from "lucide-react";
 import {
   AIProvider,
@@ -91,6 +92,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(getVoiceSettings());
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [hasElevenLabsKey, setHasElevenLabsKey] = useState(false);
+  const [isServerKeyAnId, setIsServerKeyAnId] = useState(false);
+  const [serverKeyLength, setServerKeyLength] = useState<number | undefined>(undefined);
   const [localElevenKey, setLocalElevenKey] = useState("");
   const [showElevenKey, setShowElevenKey] = useState(false);
   const [isTestingVoice, setIsTestingVoice] = useState(false);
@@ -116,6 +119,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
 
       checkServerTTSStatus().then((status) => {
         setHasElevenLabsKey(status.hasElevenLabsKey);
+        setIsServerKeyAnId(Boolean(status.isServerKeyAnId));
+        setServerKeyLength(status.serverKeyLength);
       });
 
       checkWebGPUCapability().then((cap) => {
@@ -148,7 +153,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     }
   }, []);
 
-  const handleTestVoice = () => {
+  const handleTestVoice = (withEmotions: boolean = false) => {
     if (isTestingVoice) {
       stopSpeaking();
       setIsTestingVoice(false);
@@ -158,7 +163,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     const testPhrases: Record<string, string> = {
       sr: "Zdravo! Ja sam tvoj lični profesor i asistent za učenje. Da li me čuješ potpuno jasno i razgovetno?",
       hr: "Pozdrav! Ja sam tvoj osobni profesor i asistent za učenje. Čuješ li me potpuno jasno i razgovijetno?",
-      bs: "Zdravo! Ja sam tvoj lični profesor i asistent za učenje. Da li me čuješ potpuno jasno i razgovijetno?",
+      bs: "Zdravo! Ja sam tvoj lični profesor i asistent za učenje. Da li me čuješ potpuno jasno i razgovetno?",
       en: "Hello! I am your personal study tutor and buddy. Can you hear and understand my voice clearly?",
       de: "Hallo! Ich bin dein persönlicher Lernassistent. Kannst du mich klar und deutlich verstehen?",
       fr: "Bonjour! Je suis ton tuteur d'apprentissage personnel. Est-ce que tu m'entends clairement et distinctement?",
@@ -169,7 +174,24 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       tr: "Merhaba! Ben senin kişisel çalışma öğretmeninim. Sesimi net ve anlaşılır duyabiliyor musun?",
     };
 
-    const phrase = testPhrases[lang] || testPhrases.en;
+    const emotionPhrases: Record<string, string> = {
+      sr: "[gently] Zdravo! [excitedly] Spreman sam za učenje sa tobom! [whispers] Otkrićemo sve tajne gradiva zajedno.",
+      hr: "[gently] Bok! [excitedly] Spreman sam za učenje s tobom! [whispers] Otkrit ćemo sve tajne gradiva zajedno.",
+      bs: "[gently] Zdravo! [excitedly] Spreman sam za učenje sa tobom! [whispers] Otkrit ćemo sve tajne gradiva zajedno.",
+      en: "[gently] Hello there! [excitedly] I am so excited to learn with you today! [whispers] Together, we will master everything.",
+      de: "[gently] Hallo! [excitedly] Ich freue mich riesig auf das Lernen mit dir! [whispers] Wir schaffen das gemeinsam.",
+      fr: "[gently] Bonjour! [excitedly] Je suis ravi d'apprendre avec toi! [whispers] Nous allons tout réussir ensemble.",
+      es: "[gently] ¡Hola! [excitedly] ¡Estoy muy emocionado de aprender contigo hoy! [whispers] Juntos dominaremos todo.",
+      it: "[gently] Ciao! [excitedly] Sono così felice di imparare con te! [whispers] Insieme scopriremo cose meravigliose.",
+      ru: "[gently] Привет! [excitedly] Я очень рад учиться вместе с тобой! [whispers] Вместе мы всё освоим.",
+      pt: "[gently] Olá! [excitedly] Estou muito animado para aprender com você! [whispers] Juntos vamos dominar tudo.",
+      tr: "[gently] Merhaba! [excitedly] Seninle birlikte çalışmaktan çok heyecanlıyım! [whispers] Birlikte her şeyi başaracağız.",
+    };
+
+    const phrase = withEmotions
+      ? (emotionPhrases[lang] || emotionPhrases.en)
+      : (testPhrases[lang] || testPhrases.en);
+
     setIsTestingVoice(true);
     speakText(phrase, {
       lang,
@@ -177,19 +199,26 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       pitch: voiceSettings.pitch,
       preferredVoiceURI: voiceSettings.preferredVoiceURI,
       elevenVoiceId: voiceSettings.elevenVoiceId,
+      elevenModelId: voiceSettings.elevenModelId,
+      stability: voiceSettings.elevenStability,
+      similarityBoost: voiceSettings.elevenSimilarityBoost,
+      style: voiceSettings.elevenStyle,
       provider: voiceSettings.provider,
       onEnd: () => {
         setIsTestingVoice(false);
         const lastErr = getLastTTSError();
         if (lastErr && (voiceSettings.provider === "elevenlabs" || voiceSettings.provider === "auto")) {
           if (lastErr.isKeyId) {
-            toast.warning("Uneti kod je ID ključa umesto tajnog API ključa (mora počinjati sa 'sk_'). Aktivan je sistemski glas.");
+            toast.warning("ElevenLabs kod je ID ključa umesto tajnog 'sk_' ključa. Glas je uspešno reprodukovan preko prirodnog glasovnog servera!");
           } else {
-            toast.info(`ElevenLabs nije uspeo (${lastErr.message}). Reprodukovan je sistemski glas.`);
+            toast.info(`ElevenLabs nije uspeo (${lastErr.message}). Glas je reprodukovan preko prirodnog glasovnog servera.`);
           }
         }
       },
-      onError: () => setIsTestingVoice(false),
+      onError: (err) => {
+        setIsTestingVoice(false);
+        console.warn("Test voice error:", err);
+      },
     });
   };
 
@@ -659,18 +688,24 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Izbor zvučnog mehanizma (Voice Engine)
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                 {[
                   {
                     id: "auto",
-                    title: "Automatski (Hibrid)",
-                    desc: "ElevenLabs AI kada je dostupan, uz trenutan prelazak na sistemski glas",
+                    title: "Automatski (Preporučeno)",
+                    desc: "ElevenLabs studio ako je ključ validan, inače kristalno jasan prirodni glas",
                     badge: "Preporučeno",
+                  },
+                  {
+                    id: "natural",
+                    title: "Prirodni glas (Natural)",
+                    desc: "Visokokvalitetni prirodni govor na srpskom jeziku bez potrebe za ključem",
+                    badge: "Bez ključa",
                   },
                   {
                     id: "elevenlabs",
                     title: "ElevenLabs AI Studio",
-                    desc: "Maksimalan realizam, prirodna intonacija i ljudska boja glasa",
+                    desc: "Maksimalan realizam i ljudska intonacija uz ElevenLabs sk_ ključ",
                     badge: "Ultra HD",
                   },
                   {
@@ -722,13 +757,48 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                         API ključ aktivan
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
-                        <AlertCircle className="h-3 w-3" />
-                        Koristi sistemski fallback (rezervni)
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Aktivan Prirodni glas (Natural Voice)
                       </span>
                     )}
                   </div>
                 </div>
+
+                {/* Warning if the server or local key is a Key ID */}
+                {isServerKeyAnId && !voiceSettings.elevenApiKey && (
+                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs space-y-2 text-foreground">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-600 dark:text-amber-400">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      <span>Postavljeni ključ je ID ključa ({serverKeyLength || 64} karaktera), a ne tajni ElevenLabs API ključ!</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      U sistemskim postavkama projekta je unet <strong>Key ID</strong> iz ElevenLabs tabele umesto tajnog API ključa. ElevenLabs API uvek zahteva tajni ključ koji počinje sa <code className="font-mono font-bold text-foreground bg-background px-1.5 py-0.5 rounded border border-amber-500/30">sk_</code>.
+                    </p>
+                    <div className="text-[11px] text-muted-foreground rounded bg-background/80 p-2.5 border border-border/60 space-y-1.5">
+                      <p className="font-semibold text-foreground flex items-center gap-1">
+                        Kako uneti ispravan ključ:
+                        <a
+                          href="https://elevenlabs.io/app/settings/api-keys"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-primary inline-flex items-center gap-0.5 underline font-medium ml-1"
+                        >
+                          ElevenLabs API Keys <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </p>
+                      <ol className="list-decimal list-inside space-y-0.5 text-[11px]">
+                        <li>Otvori ElevenLabs kontrolnu tablu</li>
+                        <li>Klikni na <strong>+ Create Key</strong> (ili rotiraj/napravi novi)</li>
+                        <li>Kopiraj tajni ključ koji počinje sa <strong>sk_...</strong></li>
+                        <li>Zalepi ga u polje ispod i klikni <strong>Sačuvaj</strong></li>
+                      </ol>
+                    </div>
+                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                      ✓ Aplikacija trenutno automatski koristi <strong>Prirodni glasovni server (Natural TTS)</strong> tako da nastavnik govori potpuno razgovetno!
+                    </p>
+                  </div>
+                )}
 
                 {/* API Key configuration */}
                 <div className="rounded-lg border border-border/70 bg-background p-3.5 space-y-3">
@@ -899,6 +969,144 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   </p>
                 </div>
 
+                {/* ElevenLabs Model Selector */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-muted-foreground">
+                      ElevenLabs AI Model sinteze:
+                    </label>
+                    <span className="text-[10px] font-mono text-primary font-medium">
+                      {voiceSettings.elevenModelId || "eleven_v3"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {[
+                      {
+                        id: "eleven_v3",
+                        name: "Eleven v3 (Ekspresivan & Emocije)",
+                        desc: "Podržava audio tagove poput [whispers], [giggles], [sarcastically] za živahan govor",
+                        badge: "Najnoviji v3",
+                      },
+                      {
+                        id: "eleven_multilingual_v2",
+                        name: "Eleven Multilingual v2",
+                        desc: "Stabilan i proveren višejezični model za tečnu i ujednačenu dikciju",
+                        badge: "Standard",
+                      },
+                    ].map((m) => {
+                      const isSelected = (voiceSettings.elevenModelId || "eleven_v3") === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => updateVoiceSettings({ elevenModelId: m.id })}
+                          className={`cursor-pointer rounded-lg border p-2.5 text-left transition-all ${
+                            isSelected
+                              ? "border-primary bg-primary/10 text-foreground ring-1 ring-primary shadow-xs"
+                              : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-xs text-foreground">{m.name}</span>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${isSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                              {m.badge}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-1">{m.desc}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ElevenLabs Stability & Emotion Tuning */}
+                <div className="space-y-2 rounded-xl border border-border/80 bg-muted/20 p-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                      <Sliders className="h-3.5 w-3.5 text-primary" />
+                      Stabilnost glasa &amp; Emocije (Voice Stability):
+                    </label>
+                    <span className="text-[11px] font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">
+                      {Math.round((voiceSettings.elevenStability ?? 0.50) * 100)}%
+                    </span>
+                  </div>
+
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    U ElevenLabs modelima, stabilnost od <strong>45% - 50%</strong> predstavlja optimalan balans: glas ostaje savršeno stabilan i jasan (bez pucanja ili distorzije), dok istovremeno prenosi žive emocije i reaguje na audio tagove poput <code className="text-primary font-mono">[whispers]</code>, <code className="text-primary font-mono">[excitedly]</code> i <code className="text-primary font-mono">[gently]</code>.
+                  </p>
+
+                  {/* Quick Presets */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                    {[
+                      {
+                        label: "Stabilan sa emocijama",
+                        sub: "50% (Preporučeno)",
+                        desc: "Optimalan balans: stabilna dikcija uz punu emocionalnu ekspresiju",
+                        stability: 0.50,
+                        style: 0.15,
+                        badge: "Preporučeno",
+                      },
+                      {
+                        label: "Ekspresivan & Živ",
+                        sub: "35% (Visoke emocije)",
+                        desc: "Naglašena dramatičnost i varijacije intonacije",
+                        stability: 0.35,
+                        style: 0.30,
+                        badge: "Ekspresivno",
+                      },
+                      {
+                        label: "Edukativno Stabilan",
+                        sub: "75% (Miran ton)",
+                        desc: "Maksimalno ujednačen, staložen glas za definicije",
+                        stability: 0.75,
+                        style: 0.05,
+                        badge: "Ujednačeno",
+                      },
+                    ].map((p) => {
+                      const isSelected = Math.abs((voiceSettings.elevenStability ?? 0.50) - p.stability) < 0.05;
+                      return (
+                        <button
+                          key={p.label}
+                          type="button"
+                          onClick={() => updateVoiceSettings({ elevenStability: p.stability, elevenStyle: p.style })}
+                          className={`cursor-pointer rounded-lg border p-2 text-left transition-all ${
+                            isSelected
+                              ? "border-primary bg-primary/10 text-foreground ring-1 ring-primary shadow-xs"
+                              : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="font-bold text-[11px] text-foreground">{p.label}</span>
+                            <span className={`text-[8px] px-1 py-0.2 rounded font-semibold ${isSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                              {p.badge}
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-mono text-primary font-medium">{p.sub}</div>
+                          <p className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{p.desc}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Range Slider */}
+                  <div className="pt-2 space-y-1">
+                    <div className="flex justify-between text-[10px] text-muted-foreground">
+                      <span>Više emocija / dinamika (15%)</span>
+                      <span className="font-medium text-foreground">Sredina (50%)</span>
+                      <span>Strogo monotono / fiksno (95%)</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.15"
+                      max="0.95"
+                      step="0.05"
+                      value={voiceSettings.elevenStability ?? 0.50}
+                      onChange={(e) => updateVoiceSettings({ elevenStability: parseFloat(e.target.value) })}
+                      className="w-full accent-primary h-1.5 bg-muted rounded-lg cursor-pointer"
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-semibold text-muted-foreground">
                     Izaberi primarni ElevenLabs glas nastavnika:
@@ -943,28 +1151,40 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                     Testiraj glas za trenutni jezik: <span className="uppercase text-primary font-mono font-bold bg-primary/10 px-1.5 py-0.5 rounded">{lang}</span>
                   </h4>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Klikni na dugme da poslušaš kako izabrani glas izgovara rečenicu.
+                    Poslušaj standardnu dikciju ili isprobaj emotivno čitanje sa audio tagovima.
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={isTestingVoice ? "destructive" : "default"}
-                  onClick={handleTestVoice}
-                  className="gap-2 shrink-0 font-semibold shadow-xs"
-                >
-                  {isTestingVoice ? (
-                    <>
-                      <Square className="h-3.5 w-3.5 fill-current" />
-                      Zaustavi
-                    </>
-                  ) : (
-                    <>
-                      <Play className="h-3.5 w-3.5 fill-current" />
-                      Poslušaj glas
-                    </>
-                  )}
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={isTestingVoice ? "destructive" : "outline"}
+                    onClick={() => handleTestVoice(false)}
+                    className="gap-1.5 font-semibold text-xs"
+                  >
+                    {isTestingVoice ? (
+                      <>
+                        <Square className="h-3.5 w-3.5 fill-current" />
+                        Zaustavi
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-3.5 w-3.5 fill-current" />
+                        Standardno
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={isTestingVoice ? "destructive" : "default"}
+                    onClick={() => handleTestVoice(true)}
+                    className="gap-1.5 font-semibold text-xs shadow-xs"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Sa emocijama
+                  </Button>
+                </div>
               </div>
 
               {isTestingVoice && (

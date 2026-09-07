@@ -49,7 +49,7 @@ interface ClassroomViewProps {
 
 export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
   const { user } = useAuth();
-  const { lang, t } = useI18n();
+  const { lang } = useI18n();
   const currentUserId = user?.id || "default_student";
 
   // Teacher state

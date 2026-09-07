@@ -26,15 +26,23 @@ import {
   BookOpen,
   Cpu,
   GraduationCap,
+  Loader2,
   Menu,
   MessageSquare,
   Plus,
   ShoppingBag,
   Sparkles,
   Trash2,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import {
+  useTTSPlayback,
+  playSpeech,
+  cleanSpokenText,
+} from "@/services/ttsService";
 
 function makeId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -76,8 +84,69 @@ export default function Dashboard() {
   const [initialMessages, setInitialMessages] = useState<ChatMessage[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
+  // ElevenLabs TTS audio playback service state
+  const {
+    isPlaying: isAudioPlaying,
+    isLoading: isAudioLoading,
+    currentTitle: audioTitle,
+    source: audioSource,
+    stop: stopAudio,
+  } = useTTSPlayback();
+
   // Load chat sessions and notes strictly for the logged-in student
   const currentUserId = user?.id || "default_student";
+
+  const handlePlayResponse = useCallback(
+    async (contentToPlay?: StudyContent | null, customTitle?: string) => {
+      const target = contentToPlay || currentContent;
+      if (!target) {
+        toast.info("Nema učitane lekcije za slušanje.");
+        return;
+      }
+
+      const title = customTitle || target.title || "Lekcija";
+
+      // Toggle stop if already playing this response
+      if (isAudioPlaying && audioTitle === title) {
+        stopAudio();
+        toast.info("Audio reprodukcija zaustavljena.");
+        return;
+      }
+
+      const safePoints = Array.isArray(target.keyPoints) ? target.keyPoints : [];
+      const pointsSpeech =
+        safePoints.length > 0
+          ? `Glavne teze: ${safePoints.map((p, idx) => `Tačka ${idx + 1}: ${p}`).join(". ")}`
+          : "";
+      const summarySpeech = target.summary ? `Rezime: ${target.summary}` : "";
+      const fullNotesSpeech = target.fullNotes
+        ? `Detaljnije beleške: ${target.fullNotes.slice(0, 1500)}`
+        : "";
+
+      const spokenText = cleanSpokenText(
+        `Lekcija: ${title}. ${summarySpeech}. ${pointsSpeech}. ${fullNotesSpeech}`
+      );
+
+      toast.info(`Pokrećem ElevenLabs govor: "${title}"... 🎙️`);
+
+      const res = await playSpeech(spokenText, {
+        title,
+        languageCode: "sr",
+        onEnd: () => {
+          toast.success(`Završeno slušanje lekcije: "${title}"`);
+        },
+        onError: (err) => {
+          console.warn("TTS Error in Dashboard:", err);
+          toast.error("Greška pri reprodukciji odgovora.");
+        },
+      });
+
+      if (!res.success) {
+        toast.error("Nije moguće pokrenuti reprodukciju.");
+      }
+    },
+    [currentContent, isAudioPlaying, audioTitle, stopAudio]
+  );
 
   useEffect(() => {
     setNotes(getNotes(currentUserId));
@@ -458,6 +527,9 @@ export default function Dashboard() {
                   isGenerating={isGenerating}
                   onSave={handleSave}
                   saved={isSaved}
+                  onPlayResponse={handlePlayResponse}
+                  isPlayingResponse={isAudioPlaying && (audioTitle === (currentContent?.title || "Lekcija"))}
+                  isLoadingAudio={isAudioLoading}
                 />
               </section>
             </div>
@@ -512,6 +584,25 @@ export default function Dashboard() {
                         {Array.isArray(note.content?.keyPoints) ? note.content.keyPoints.length : 0} Tačaka
                       </span>
                       <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePlayResponse(note.content, note.title);
+                          }}
+                          className={`cursor-pointer rounded-lg p-1 transition-all ${
+                            isAudioPlaying && audioTitle === note.title
+                              ? "bg-primary/20 text-primary animate-pulse"
+                              : "text-muted-foreground hover:bg-primary/15 hover:text-primary"
+                          }`}
+                          title="Slušaj lekciju uz ElevenLabs"
+                        >
+                          {isAudioPlaying && audioTitle === note.title ? (
+                            <VolumeX className="h-3.5 w-3.5 text-primary" />
+                          ) : (
+                            <Volume2 className="h-3.5 w-3.5" />
+                          )}
+                        </button>
                         <span className="text-[10px] text-muted-foreground">
                           {new Date(note.createdAt).toLocaleDateString()}
                         </span>
@@ -661,6 +752,67 @@ export default function Dashboard() {
         open={profileOpen}
         onOpenChange={setProfileOpen}
       />
+
+      {/* ElevenLabs Response Audio Player Bar */}
+      {(isAudioPlaying || isAudioLoading) && (
+        <aside
+          aria-label="ElevenLabs Audio Response Player"
+          className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[94%] max-w-lg animate-in slide-in-from-bottom-5 duration-300"
+        >
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-primary/40 bg-card/95 backdrop-blur-md px-4 py-3 shadow-xl shadow-primary/15">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
+                {isAudioLoading ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                ) : (
+                  <Volume2 className="h-5 w-5 text-primary animate-pulse" />
+                )}
+                {isAudioPlaying && (
+                  <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                  </span>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
+                    {audioSource === "elevenlabs" ? "ElevenLabs AI Glas" : "Glas Odgovora"}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">• Slušanje</span>
+                </div>
+                <p className="text-xs font-bold text-foreground truncate">
+                  {audioTitle || "AI Odgovor"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Animated Sound Waves */}
+              {isAudioPlaying && (
+                <div className="hidden sm:flex items-center gap-0.5 h-4 px-1.5">
+                  <span className="w-1 bg-primary rounded-full animate-bounce [animation-delay:0ms] h-3" />
+                  <span className="w-1 bg-primary rounded-full animate-bounce [animation-delay:150ms] h-5" />
+                  <span className="w-1 bg-primary rounded-full animate-bounce [animation-delay:300ms] h-2" />
+                  <span className="w-1 bg-primary rounded-full animate-bounce [animation-delay:75ms] h-4" />
+                </div>
+              )}
+
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                onClick={stopAudio}
+                className="h-8 rounded-xl px-3 text-xs font-bold gap-1.5 shadow-xs"
+              >
+                <VolumeX className="h-3.5 w-3.5" />
+                <span>Zaustavi</span>
+              </Button>
+            </div>
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

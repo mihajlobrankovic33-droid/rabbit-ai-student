@@ -10,6 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.67.0",
     "@google/genai": "^2.18.0",
     "@mlc-ai/web-llm": "^0.2.84",
     "@radix-ui/react-dialog": "^1.1.6",

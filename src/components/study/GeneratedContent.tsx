@@ -12,6 +12,8 @@ import {
   Loader2,
   Printer,
   Sparkles,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,6 +22,9 @@ interface GeneratedContentProps {
   isGenerating: boolean;
   onSave: () => void;
   saved: boolean;
+  onPlayResponse?: (content: StudyContent) => void;
+  isPlayingResponse?: boolean;
+  isLoadingAudio?: boolean;
 }
 
 export function GeneratedContent({
@@ -27,6 +32,9 @@ export function GeneratedContent({
   isGenerating,
   onSave,
   saved,
+  onPlayResponse,
+  isPlayingResponse = false,
+  isLoadingAudio = false,
 }: GeneratedContentProps) {
   const [copied, setCopied] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
@@ -115,7 +123,37 @@ export function GeneratedContent({
           <h2 className="text-2xl font-extrabold tracking-tight text-foreground">{content.title}</h2>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {onPlayResponse && (
+            <Button
+              type="button"
+              variant={isPlayingResponse ? "default" : "outline"}
+              size="sm"
+              onClick={() => onPlayResponse(content)}
+              className={`h-9 gap-1.5 rounded-xl text-xs font-semibold transition-all ${
+                isPlayingResponse
+                  ? "bg-primary text-primary-foreground shadow-sm animate-pulse"
+                  : "hover:border-primary/50 hover:bg-primary/5 text-foreground"
+              }`}
+              title="Slušaj lekciju uz ElevenLabs AI glas"
+            >
+              {isLoadingAudio ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              ) : isPlayingResponse ? (
+                <VolumeX className="h-3.5 w-3.5" />
+              ) : (
+                <Volume2 className="h-3.5 w-3.5 text-primary" />
+              )}
+              <span>
+                {isLoadingAudio
+                  ? "Učitavanje glasa..."
+                  : isPlayingResponse
+                  ? "Zaustavi govor"
+                  : "Slušaj lekciju (ElevenLabs)"}
+              </span>
+            </Button>
+          )}
+
           <Button
             type="button"
             variant="outline"

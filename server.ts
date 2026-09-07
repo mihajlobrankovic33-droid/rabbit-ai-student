@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 
 async function startServer() {
   const app = express();
@@ -85,14 +86,42 @@ async function startServer() {
       traits: "Fokusiran, jasan govor bez oklevanja",
       persona: "Idealan za definicije i formule",
     },
+    {
+      id: "NOpBlnGInO9m6vDvFkFC",
+      name: "Zephyros (Eldoria Storyteller)",
+      gender: "male",
+      traits: "Mudar, ekspresivan, podržava v3 audio tagove i emocije",
+      persona: "Preporučeno za priče, v3 ekspresije i slikovita objašnjenja",
+    },
+    {
+      id: "JBFqnCBsd6RMkjVDRZzb",
+      name: "George (Topao & Izuzetno Stabilan)",
+      gender: "male",
+      traits: "Topao, smiren narator, vrhunska stabilnost sa prirodnim emocijama",
+      persona: "Preporučeno za stabilan govor sa emocijama i lekcije",
+    },
+    {
+      id: "cgSgspJ2msm6clMCkdW9",
+      name: "Jessica (Ekspresivna & Stabilna)",
+      gender: "female",
+      traits: "Jasna, vedra, izražajna dikcija sa živom modulacijom",
+      persona: "Odlična za konverzaciju, pitanja i dinamično vođenje",
+    },
   ];
 
   // List available TTS options
   app.get("/api/tts/voices", (_req, res) => {
+    const envKey = (process.env.ELEVENLABS_API_KEY || "").trim().replace(/^["']|["']$/g, "");
+    const isServerKeyAnId = Boolean(envKey && !envKey.startsWith("sk_"));
+    const hasElevenLabsKey = Boolean(envKey && envKey.startsWith("sk_"));
+
     res.json({
-      hasElevenLabsKey: Boolean(process.env.ELEVENLABS_API_KEY),
+      hasElevenLabsKey,
+      isServerKeyAnId,
+      serverKeyLength: envKey.length,
       voices: CURATED_ELEVENLABS_VOICES,
-      defaultModel: "eleven_multilingual_v2",
+      defaultModel: "eleven_v3",
+      availableModels: ["eleven_v3", "eleven_multilingual_v2"],
     });
   });
 
@@ -101,7 +130,8 @@ async function startServer() {
     try {
       const headerKey = typeof req.headers["x-elevenlabs-key"] === "string" ? req.headers["x-elevenlabs-key"].trim() : "";
       const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
-      const apiKey = bodyKey || headerKey || process.env.ELEVENLABS_API_KEY;
+      const rawKey = bodyKey || headerKey || process.env.ELEVENLABS_API_KEY || "";
+      const apiKey = rawKey.trim().replace(/^["']|["']$/g, "");
 
       if (!apiKey) {
         res.status(400).json({ valid: false, error: "Nije unet ElevenLabs API ključ." });
@@ -125,17 +155,21 @@ async function startServer() {
       if (!testRes.ok) {
         const errText = await testRes.text();
         let parsedMessage = errText;
-        let isKeyId = false;
+        let isKeyId = !apiKey.startsWith("sk_");
         try {
           const parsed = JSON.parse(errText);
           if (parsed.detail?.message) parsedMessage = parsed.detail.message;
-          if (parsed.detail?.status === "api_key_id_used_as_api_key") isKeyId = true;
-        } catch {}
+          if (parsed.detail?.status === "api_key_id_used_as_api_key" || parsed.detail?.code === "invalid_api_key") {
+            isKeyId = true;
+          }
+        } catch (parseErr) {
+          console.warn("ElevenLabs test response parsing notice:", parseErr);
+        }
 
         res.status(400).json({
           valid: false,
           error: isKeyId
-            ? "Uneli ste ID ključa (Key ID) a ne tajni API ključ! ElevenLabs API ključ uvek počinje sa 'sk_'."
+            ? "Uneli ste ID ključa (Key ID) a ne tajni API ključ! ElevenLabs API ključ uvek počinje sa 'sk_'. U ElevenLabs kontrolnoj tabli kliknite na '+ Create Key' i kopirajte tajni ključ koji počinje sa 'sk_'."
             : `ElevenLabs greška: ${parsedMessage}`,
           isKeyId,
         });
@@ -162,12 +196,124 @@ async function startServer() {
     }
   });
 
-  // ElevenLabs Text-to-Speech proxy endpoint
+  // Universal Natural Speech proxy endpoint (zero-config, high clarity fallback)
+  app.post("/api/tts/natural", async (req, res) => {
+    try {
+      const { text, lang = "sr" } = req.body;
+      const rawText = typeof text === "string" ? text : "";
+      // Strip any [whispers], [excitedly], etc. emotion tags so Google TTS doesn't attempt to spell them
+      const cleanText = rawText
+        .replace(/\[\s*(?:whispers|giggles|sarcastically|sighs|laughs|snickers|cries|shouts|yells|clears throat|pause|excitedly|curiously|gently|warmly|softly|calmly|proudly|thoughtfully|enthusiastically|cheerfully|dramatically|seriously|confidently|friendly|lovingly|nervously|relieved|happy|sad|excited|curious|[a-zA-Z]{3,20})\s*\]/gi, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+      if (!cleanText) {
+        res.status(400).json({ error: "Tekst je neophodan za sintezu govora." });
+        return;
+      }
+
+      const langCodeMap: Record<string, string> = {
+        sr: "sr",
+        hr: "hr",
+        bs: "bs",
+        en: "en",
+        de: "de",
+        fr: "fr",
+        es: "es",
+        it: "it",
+        ru: "ru",
+        pt: "pt",
+        tr: "tr",
+      };
+      const targetLang = langCodeMap[lang.slice(0, 2).toLowerCase()] || "sr";
+
+      // Split into chunks of max 180 characters by sentence / comma
+      const chunks: string[] = [];
+      const sentences = cleanText.match(/[^.!?,\n]+[.!?,\n]*|.+/g) || [cleanText];
+      let currentChunk = "";
+
+      for (const sentence of sentences) {
+        const trimmed = sentence.trim();
+        if (!trimmed) continue;
+        if ((currentChunk + " " + trimmed).trim().length <= 180) {
+          currentChunk = (currentChunk + " " + trimmed).trim();
+        } else {
+          if (currentChunk) chunks.push(currentChunk);
+          if (trimmed.length > 180) {
+            const words = trimmed.split(/\s+/);
+            let subChunk = "";
+            for (const word of words) {
+              if ((subChunk + " " + word).trim().length <= 180) {
+                subChunk = (subChunk + " " + word).trim();
+              } else {
+                if (subChunk) chunks.push(subChunk);
+                subChunk = word;
+              }
+            }
+            if (subChunk) currentChunk = subChunk;
+            else currentChunk = "";
+          } else {
+            currentChunk = trimmed;
+          }
+        }
+      }
+      if (currentChunk) chunks.push(currentChunk);
+
+      const buffers: Buffer[] = [];
+      for (const chunk of chunks.slice(0, 15)) {
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=${targetLang}&client=tw-ob`;
+        const ttsRes = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+        });
+        if (ttsRes.ok) {
+          const ab = await ttsRes.arrayBuffer();
+          buffers.push(Buffer.from(ab));
+        }
+      }
+
+      if (buffers.length === 0) {
+        res.status(500).json({ error: "Sinteza govora nije uspela." });
+        return;
+      }
+
+      const combined = Buffer.concat(buffers);
+      const range = req.headers.range;
+
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10) || 0;
+        const end = parts[1] ? parseInt(parts[1], 10) : combined.length - 1;
+        const chunksize = end - start + 1;
+        res.status(206);
+        res.setHeader("Content-Range", `bytes ${start}-${end}/${combined.length}`);
+        res.setHeader("Content-Length", chunksize);
+        res.send(combined.subarray(start, end + 1));
+      } else {
+        res.setHeader("Content-Length", combined.length);
+        res.send(combined);
+      }
+    } catch (err) {
+      console.error("Natural TTS error:", err);
+      res.status(500).json({
+        error: "NATURAL_TTS_ERROR",
+        message: err instanceof Error ? err.message : "Greška pri obradi govora.",
+      });
+    }
+  });
+
+  // ElevenLabs Text-to-Speech proxy endpoint using official ElevenLabsClient SDK
   app.post("/api/tts/elevenlabs", async (req, res) => {
     try {
       const headerKey = typeof req.headers["x-elevenlabs-key"] === "string" ? req.headers["x-elevenlabs-key"].trim() : "";
       const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
-      const apiKey = process.env.ELEVENLABS_API_KEY || headerKey || bodyKey;
+      const rawKey = headerKey || bodyKey || process.env.ELEVENLABS_API_KEY || "";
+      const apiKey = rawKey.trim().replace(/^["']|["']$/g, "");
 
       if (!apiKey) {
         res.status(400).json({
@@ -187,70 +333,82 @@ async function startServer() {
         return;
       }
 
-      const { text, voiceId, modelId } = req.body;
+      const { text, voiceId, modelId, languageCode, voiceSettings: incomingVoiceSettings } = req.body;
       const cleanText = (typeof text === "string" ? text : "").trim();
       if (!cleanText) {
         res.status(400).json({ error: "Tekst je neophodan za sintezu govora." });
         return;
       }
 
-      const targetVoice = voiceId || "21m00Tcm4TlvDq8ikWAM";
-      const targetModel = modelId || "eleven_multilingual_v2";
+      const targetVoice = voiceId || "NOpBlnGInO9m6vDvFkFC";
+      const targetModel = modelId || "eleven_v3";
+      const targetLanguageCode = typeof languageCode === "string" && languageCode.trim() ? languageCode.trim() : undefined;
 
-      const elevenRes = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${targetVoice}?output_format=mp3_44100_128`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "xi-api-key": apiKey,
-          },
-          body: JSON.stringify({
+      // Calibration for stable voice with emotions:
+      // In ElevenLabs: stability around 0.45 - 0.50 maintains high acoustic consistency (no glitches or voice cracks)
+      // while allowing rich emotional expression, tonal inflections, and v3 audio tags ([whispers], [excitedly], etc.)
+      const stability = typeof incomingVoiceSettings?.stability === "number"
+        ? Math.min(Math.max(incomingVoiceSettings.stability, 0.0), 1.0)
+        : 0.50;
+      const similarityBoost = typeof incomingVoiceSettings?.similarityBoost === "number"
+        ? Math.min(Math.max(incomingVoiceSettings.similarityBoost, 0.0), 1.0)
+        : 0.75;
+      const style = typeof incomingVoiceSettings?.style === "number"
+        ? Math.min(Math.max(incomingVoiceSettings.style, 0.0), 1.0)
+        : 0.15;
+      const useSpeakerBoost = incomingVoiceSettings?.useSpeakerBoost !== false;
+
+      const elevenlabs = new ElevenLabsClient({ apiKey });
+
+      // Voice settings: v3 primarily modulates stability for expressive speech vs consistency
+      // v2 models support stability, similarityBoost, style, and useSpeakerBoost
+      const v3VoiceSettings = { stability };
+      const v2VoiceSettings = { stability, similarityBoost, style, useSpeakerBoost };
+
+      let audioStream: AsyncIterable<Uint8Array | Buffer>;
+      try {
+        audioStream = await elevenlabs.textToSpeech.convert(targetVoice, {
+          text: cleanText.slice(0, 4000),
+          modelId: targetModel,
+          languageCode: targetLanguageCode,
+          voiceSettings: targetModel === "eleven_v3" ? v3VoiceSettings : v2VoiceSettings,
+        }) as AsyncIterable<Uint8Array | Buffer>;
+      } catch (convertErr: unknown) {
+        // If eleven_v3 is not accessible or languageCode is unsupported, gracefully try eleven_multilingual_v2
+        if (targetModel !== "eleven_multilingual_v2") {
+          console.warn(`Fallback to eleven_multilingual_v2 for voice ${targetVoice}:`, convertErr instanceof Error ? convertErr.message : convertErr);
+          audioStream = await elevenlabs.textToSpeech.convert(targetVoice, {
             text: cleanText.slice(0, 4000),
-            model_id: targetModel,
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.8,
-              style: 0.0,
-              use_speaker_boost: true,
-            },
-          }),
+            modelId: "eleven_multilingual_v2",
+            voiceSettings: v2VoiceSettings,
+          }) as AsyncIterable<Uint8Array | Buffer>;
+        } else {
+          throw convertErr;
         }
-      );
-
-      if (!elevenRes.ok) {
-        const errText = await elevenRes.text();
-        let parsedMessage = errText;
-        let isKeyId = false;
-        try {
-          const parsed = JSON.parse(errText);
-          if (parsed.detail?.message) parsedMessage = parsed.detail.message;
-          if (parsed.detail?.status === "api_key_id_used_as_api_key") isKeyId = true;
-        } catch {}
-
-        console.warn("ElevenLabs TTS warning:", elevenRes.status, parsedMessage);
-        res.status(elevenRes.status).json({
-          error: isKeyId ? "KEY_ID_USED" : "ELEVENLABS_API_ERROR",
-          message: isKeyId
-            ? "Uneli ste ID ključa (Key ID) a ne tajni API ključ. ElevenLabs ključ mora počinjati sa 'sk_'."
-            : `ElevenLabs greška (${elevenRes.status}): ${parsedMessage}`,
-          isKeyId,
-        });
-        return;
       }
 
-      const arrayBuffer = await elevenRes.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      const chunks: Buffer[] = [];
+      for await (const chunk of audioStream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const buffer = Buffer.concat(chunks);
 
       res.setHeader("Content-Type", "audio/mpeg");
       res.setHeader("Content-Length", buffer.length);
       res.setHeader("Cache-Control", "public, max-age=3600");
       res.send(buffer);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("ElevenLabs TTS handler error:", err);
-      res.status(500).json({
-        error: "TTS_INTERNAL_ERROR",
-        message: err instanceof Error ? err.message : "Interna greška pri sintezi govora.",
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const isKeyId = errMsg.includes("api_key_id_used_as_api_key") || errMsg.includes("only valid API keys can be used");
+      const errWithStatus = err as { statusCode?: number };
+      const status = typeof errWithStatus?.statusCode === "number" ? errWithStatus.statusCode : 500;
+      res.status(status).json({
+        error: isKeyId ? "KEY_ID_USED" : "ELEVENLABS_API_ERROR",
+        message: isKeyId
+          ? "Uneli ste ID ključa (Key ID) a ne tajni API ključ. ElevenLabs ključ mora počinjati sa 'sk_'."
+          : `ElevenLabs greška (${status}): ${errMsg}`,
+        isKeyId,
       });
     }
   });
@@ -396,13 +554,13 @@ CLASS FORMAT: ${classMode} (Question 1 of ${totalQuestions})
 LANGUAGE: Respond strictly in ${isSr ? "Serbian (Latinica, prirodan i šarmantan profesorski ton)" : "English"}.
 
 TASK:
-1. Greet the student to the classroom / blackboard warmly in character as ${teacherName}.
+1. Greet the student to the classroom / blackboard warmly in character as ${teacherName}. Feel free to include 1-2 natural spoken emotion tags (e.g. [warmly], [excitedly], [chuckles], [gently]) in the welcomeMessage for expressive ElevenLabs TTS audio.
 2. Pose Question #1 (clear, engaging, thought-provoking, testing foundational understanding of "${topic}").
 3. Provide a brief gentle hint to be available if they get stuck.
 
 Return STRICT JSON matching this schema:
 {
-  "welcomeMessage": "Warm classroom greeting inviting the student to answer",
+  "welcomeMessage": "Warm classroom greeting with natural emotion tags inviting the student to answer",
   "question": "The exact Question #1 to test the student",
   "hint": "A helpful hint or analogy if they need assistance",
   "animalReaction": "Short cute physical reaction (e.g. adjusts small glasses, wiggles ears, taps blackboard)"
@@ -459,7 +617,7 @@ LANGUAGE: Respond strictly in ${isSr ? "Serbian (Latinica)" : "English"}.
 TASK:
 1. Rigorously evaluate the accuracy, depth, and clarity of the student's answer.
 2. Assign a score from 0 to 100, and a grade (e.g. "5 (Odličan)", "4 (Vrlo dobar)", "3 (Dobar)", "2 (Dovoljan)", or "1 (Nedovoljan)").
-3. Provide constructive, warm teacher feedback explaining what was great and what could be added or corrected.
+3. Provide constructive, warm teacher feedback explaining what was great and what could be added or corrected. You may include 1-2 expressive spoken emotion tags (e.g. [proudly], [excitedly], [thoughtfully], [gently], [chuckles]) in the feedback so spoken TTS sounds full of life.
 4. Give an adorable animal teacher reaction (mentioning their tail, paws, glasses, or expressions).
 5. If score >= 60, award the ${rewardItem}!
 6. If NOT final question, generate Question #${currentQuestionNumber + 1} advancing the topic logically. If final, leave nextQuestion empty.
@@ -469,7 +627,7 @@ Return STRICT JSON matching this schema:
   "score": number between 0 and 100,
   "grade": "e.g. 5 (Odličan)",
   "isCorrect": boolean,
-  "feedback": "Detailed, encouraging feedback explaining the concept and correction",
+  "feedback": "Detailed, encouraging feedback with optional emotion tags explaining the concept and correction",
   "animalReaction": "Cute physical reaction by the animal teacher",
   "rewardEarned": boolean,
   "nextQuestion": "The next question in the oral exam progression (or empty if final)",

@@ -22,6 +22,7 @@ import {
   Laptop,
   Timer,
   Trash2,
+  Volume2,
   Wifi,
   WifiOff,
   X,
@@ -29,6 +30,7 @@ import {
   Edit3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { VoicePresetDropdown } from "@/components/study/VoicePresetDropdown";
 import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "next-themes";
 import { useNavigate } from "react-router";
@@ -470,7 +472,28 @@ export function HamburgerMenu({
             </div>
           </section>
 
-          {/* 5. Theme & Appearance (Mode + Color Palettes) */}
+          {/* 5. ElevenLabs Voice Presets for Study Sessions */}
+          <section className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Volume2 className="h-4 w-4 text-primary" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                  ElevenLabs Glas za Učenje
+                </h3>
+              </div>
+              <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                HD Naracija
+              </span>
+            </div>
+
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Izaberi glas za svoje studijske sesije i čitanje lekcija (npr. Antoni, Rachel, Adam ili Bella):
+            </p>
+
+            <VoicePresetDropdown id="hamburger-voice-preset-dropdown" />
+          </section>
+
+          {/* 6. Theme & Appearance (Mode + Color Palettes) */}
           <section className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
             <div className="flex items-center gap-2">
               <Palette className="h-4 w-4 text-primary" />
@@ -552,7 +575,7 @@ export function HamburgerMenu({
             </div>
           </section>
 
-          {/* 6. Offline App Download & Status Banner */}
+          {/* 7. Offline App Download & Status Banner */}
           <section className="space-y-3 rounded-2xl border border-border/70 bg-gradient-to-br from-primary/5 via-card to-background p-4 shadow-xs">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -631,7 +654,7 @@ export function HamburgerMenu({
             </Button>
           </section>
 
-          {/* 7. AI Engine Settings */}
+          {/* 8. AI Engine Settings */}
           <section className="rounded-2xl border border-border/70 bg-muted/20 p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
