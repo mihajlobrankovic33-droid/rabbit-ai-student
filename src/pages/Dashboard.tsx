@@ -374,8 +374,8 @@ export default function Dashboard() {
 
             <div className="h-6 w-px bg-border/80 hidden sm:block" />
 
-            {/* Top Navigation Buttons: Chat, Učionica, Notes, and Market */}
-            <div className="flex items-center gap-1 rounded-2xl bg-muted/60 p-1 border border-border/60 shadow-2xs">
+            {/* Top Navigation Buttons: Chat, Učionica, Notes, and Market — hidden on mobile, shown on desktop */}
+            <div className="hidden md:flex items-center gap-1 rounded-2xl bg-muted/60 p-1 border border-border/60 shadow-2xs">
               <button
                 type="button"
                 onClick={() => setActiveView("chat")}
