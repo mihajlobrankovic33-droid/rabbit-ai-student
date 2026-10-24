@@ -21,6 +21,27 @@ Use bun for the package manager.
 
 This project is set up already and running on a cloud environment, as well as a convex development in the sandbox.
 
+```bash
+npm install     # or bun install
+npm run dev     # starts the app on http://localhost:3000
+```
+
+### AI keys (`.env` in the project root)
+
+Copy `.env.example` to `.env` and fill in what you need:
+
+| Key | Needed for | Notes |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | Chat agent, notes, classroom exam | Required for the cloud brain. Get a free key at https://aistudio.google.com/apikey |
+| `GEMINI_MODEL` | *(optional)* | Overrides the single model used everywhere. Default: `gemini-flash-latest` |
+| `WOLFRAM_APPID` | Exact formulas & answers | Free key at https://developer.wolframalpha.com. Adds a verified "🧮 Wolfram Alpha" answer block to math questions. Without it everything still works. |
+| `ELEVENLABS_API_KEY` | Voices | Must start with `sk_` |
+
+Check that everything is wired up by calling `GET /api/health`.
+
+The chat renders LaTeX formulas (`$...$` / `$$...$$`) with KaTeX and always ends
+concrete problems with a bold final answer line.
+
 ## Environment Variables
 
 The project is set up with project specific CONVEX_DEPLOYMENT and VITE_CONVEX_URL environment variables on the client side.

@@ -1,8 +1,52 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+
+// Load .env for the Node process (tsx/dev + prod) so GEMINI_API_KEY / WOLFRAM_APPID work
+function loadEnvFile(): void {
+  const envPath = path.join(process.cwd(), ".env");
+  if (!fs.existsSync(envPath)) return;
+  try {
+    process.loadEnvFile(envPath);
+  } catch {
+    // Fallback manual parser
+    try {
+      const raw = fs.readFileSync(envPath, "utf8");
+      for (const line of raw.split(/\r?\n/)) {
+        const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+        if (!match) continue;
+        const key = match[1];
+        let value = match[2].trim();
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1);
+        }
+        if (!(key in process.env)) process.env[key] = value;
+      }
+    } catch (parseErr) {
+      console.warn("Could not parse .env file:", parseErr);
+    }
+  }
+}
+
+loadEnvFile();
+
+/**
+ * The single Gemini model used across every AI endpoint.
+ * Override with GEMINI_MODEL in .env if you ever need to change it.
+ */
+const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-flash-latest").trim();
+
+function getGeminiApiKey(): string | undefined {
+  const key =
+    process.env.GEMINI_API_KEY?.trim() || process.env.VITE_GEMINI_API_KEY?.trim();
+  return key || undefined;
+}
 
 async function startServer() {
   const app = express();
@@ -13,9 +57,15 @@ async function startServer() {
   // Lazy Gemini client helper
   let genAIClient: GoogleGenAI | null = null;
   function getGeminiClient(): GoogleGenAI {
+    const apiKey = getGeminiApiKey();
+    if (!apiKey) {
+      throw new Error(
+        "GEMINI_API_KEY nije podeĹˇen. Dodaj GEMINI_API_KEY (ili VITE_GEMINI_API_KEY) u .env fajl i restartuj server."
+      );
+    }
     if (!genAIClient) {
       genAIClient = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
+        apiKey,
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build",
@@ -30,7 +80,9 @@ async function startServer() {
   app.get("/api/health", (_req, res) => {
     res.json({
       status: "ok",
-      hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+      model: GEMINI_MODEL,
+      hasGeminiKey: Boolean(getGeminiApiKey()),
+      hasWolframKey: Boolean(process.env.WOLFRAM_APPID?.trim()),
       hasElevenLabsKey: Boolean(process.env.ELEVENLABS_API_KEY),
     });
   });
@@ -42,42 +94,42 @@ async function startServer() {
       name: "Rachel",
       gender: "female",
       traits: "Miran, topao, jasan glas nastavnice",
-      persona: "Preporučeno za zeca Lolu i strpljivo učenje",
+      persona: "PreporuÄŤeno za zeca Lolu i strpljivo uÄŤenje",
     },
     {
       id: "pNInz6obpgDQGcFmaJgB",
       name: "Adam",
       gender: "male",
       traits: "Dubok, autoritativan, mudar glas",
-      persona: "Preporučeno za pandu Baoa i predavanja",
+      persona: "PreporuÄŤeno za pandu Baoa i predavanja",
     },
     {
       id: "ErXwobaYiN019PkySvjV",
       name: "Antoni",
       gender: "male",
-      traits: "Bistar, energičan, precizno artikulisan",
-      persona: "Preporučeno za lisca Feliksa i kvizove",
+      traits: "Bistar, energiÄŤan, precizno artikulisan",
+      persona: "PreporuÄŤeno za lisca Feliksa i kvizove",
     },
     {
       id: "EXAVITQu4vr4xnSDxMaL",
       name: "Bella",
       gender: "female",
-      traits: "Izražajna, dinamična, motivišuća",
-      persona: "Preporučeno za mačku Micu i dijalog",
+      traits: "IzraĹľajna, dinamiÄŤna, motiviĹˇuÄ‡a",
+      persona: "PreporuÄŤeno za maÄŤku Micu i dijalog",
     },
     {
       id: "TxGEqnHWrfWFTfGW9XjX",
       name: "Josh",
       gender: "male",
       traits: "Prirodan, prijateljski edukator",
-      persona: "Odličan za detaljna objašnjenja",
+      persona: "OdliÄŤan za detaljna objaĹˇnjenja",
     },
     {
       id: "MF3mGyEYCl7XYWbV9V6O",
       name: "Elli",
       gender: "female",
-      traits: "Nežna, vedra, kristalno jasna",
-      persona: "Odlična za decu i lakše gradivo",
+      traits: "NeĹľna, vedra, kristalno jasna",
+      persona: "OdliÄŤna za decu i lakĹˇe gradivo",
     },
     {
       id: "VR6AewLTigWG4xSOukaG",
@@ -90,22 +142,22 @@ async function startServer() {
       id: "NOpBlnGInO9m6vDvFkFC",
       name: "Zephyros (Eldoria Storyteller)",
       gender: "male",
-      traits: "Mudar, ekspresivan, podržava v3 audio tagove i emocije",
-      persona: "Preporučeno za priče, v3 ekspresije i slikovita objašnjenja",
+      traits: "Mudar, ekspresivan, podrĹľava v3 audio tagove i emocije",
+      persona: "PreporuÄŤeno za priÄŤe, v3 ekspresije i slikovita objaĹˇnjenja",
     },
     {
       id: "JBFqnCBsd6RMkjVDRZzb",
       name: "George (Topao & Izuzetno Stabilan)",
       gender: "male",
       traits: "Topao, smiren narator, vrhunska stabilnost sa prirodnim emocijama",
-      persona: "Preporučeno za stabilan govor sa emocijama i lekcije",
+      persona: "PreporuÄŤeno za stabilan govor sa emocijama i lekcije",
     },
     {
       id: "cgSgspJ2msm6clMCkdW9",
       name: "Jessica (Ekspresivna & Stabilna)",
       gender: "female",
-      traits: "Jasna, vedra, izražajna dikcija sa živom modulacijom",
-      persona: "Odlična za konverzaciju, pitanja i dinamično vođenje",
+      traits: "Jasna, vedra, izraĹľajna dikcija sa Ĺľivom modulacijom",
+      persona: "OdliÄŤna za konverzaciju, pitanja i dinamiÄŤno voÄ‘enje",
     },
   ];
 
@@ -134,7 +186,7 @@ async function startServer() {
       const apiKey = rawKey.trim().replace(/^["']|["']$/g, "");
 
       if (!apiKey) {
-        res.status(400).json({ valid: false, error: "Nije unet ElevenLabs API ključ." });
+        res.status(400).json({ valid: false, error: "Nije unet ElevenLabs API kljuÄŤ." });
         return;
       }
 
@@ -142,7 +194,7 @@ async function startServer() {
       if (!apiKey.startsWith("sk_")) {
         res.status(400).json({
           valid: false,
-          error: "Uneli ste ID ključa (Key ID) a ne tajni API ključ! ElevenLabs API ključevi uvek počinju sa 'sk_'. U ElevenLabs kontrolnoj tabli kreirajte novi ključ ili kopirajte tajnu vrednost koja počinje sa 'sk_'.",
+          error: "Uneli ste ID kljuÄŤa (Key ID) a ne tajni API kljuÄŤ! ElevenLabs API kljuÄŤevi uvek poÄŤinju sa 'sk_'. U ElevenLabs kontrolnoj tabli kreirajte novi kljuÄŤ ili kopirajte tajnu vrednost koja poÄŤinje sa 'sk_'.",
           isKeyId: true,
         });
         return;
@@ -169,8 +221,8 @@ async function startServer() {
         res.status(400).json({
           valid: false,
           error: isKeyId
-            ? "Uneli ste ID ključa (Key ID) a ne tajni API ključ! ElevenLabs API ključ uvek počinje sa 'sk_'. U ElevenLabs kontrolnoj tabli kliknite na '+ Create Key' i kopirajte tajni ključ koji počinje sa 'sk_'."
-            : `ElevenLabs greška: ${parsedMessage}`,
+            ? "Uneli ste ID kljuÄŤa (Key ID) a ne tajni API kljuÄŤ! ElevenLabs API kljuÄŤ uvek poÄŤinje sa 'sk_'. U ElevenLabs kontrolnoj tabli kliknite na '+ Create Key' i kopirajte tajni kljuÄŤ koji poÄŤinje sa 'sk_'."
+            : `ElevenLabs greĹˇka: ${parsedMessage}`,
           isKeyId,
         });
         return;
@@ -191,7 +243,7 @@ async function startServer() {
     } catch (err) {
       res.status(500).json({
         valid: false,
-        error: err instanceof Error ? err.message : "Greška pri proveri ključa",
+        error: err instanceof Error ? err.message : "GreĹˇka pri proveri kljuÄŤa",
       });
     }
   });
@@ -302,7 +354,7 @@ async function startServer() {
       console.error("Natural TTS error:", err);
       res.status(500).json({
         error: "NATURAL_TTS_ERROR",
-        message: err instanceof Error ? err.message : "Greška pri obradi govora.",
+        message: err instanceof Error ? err.message : "GreĹˇka pri obradi govora.",
       });
     }
   });
@@ -318,7 +370,7 @@ async function startServer() {
       if (!apiKey) {
         res.status(400).json({
           error: "ELEVENLABS_KEY_MISSING",
-          message: "ELEVENLABS_API_KEY nije podešen na serveru niti prosleđen u zahtevu.",
+          message: "ELEVENLABS_API_KEY nije podeĹˇen na serveru niti prosleÄ‘en u zahtevu.",
         });
         return;
       }
@@ -327,7 +379,7 @@ async function startServer() {
       if (!apiKey.startsWith("sk_")) {
         res.status(400).json({
           error: "KEY_ID_USED",
-          message: "Uneli ste ID ključa (Key ID) a ne tajni ElevenLabs API ključ. ElevenLabs API ključ mora počinjati sa 'sk_'. Otvorite ElevenLabs profil i kopirajte tajni ključ koji počinje sa 'sk_'.",
+          message: "Uneli ste ID kljuÄŤa (Key ID) a ne tajni ElevenLabs API kljuÄŤ. ElevenLabs API kljuÄŤ mora poÄŤinjati sa 'sk_'. Otvorite ElevenLabs profil i kopirajte tajni kljuÄŤ koji poÄŤinje sa 'sk_'.",
           isKeyId: true,
         });
         return;
@@ -406,10 +458,164 @@ async function startServer() {
       res.status(status).json({
         error: isKeyId ? "KEY_ID_USED" : "ELEVENLABS_API_ERROR",
         message: isKeyId
-          ? "Uneli ste ID ključa (Key ID) a ne tajni API ključ. ElevenLabs ključ mora počinjati sa 'sk_'."
-          : `ElevenLabs greška (${status}): ${errMsg}`,
+          ? "Uneli ste ID kljuÄŤa (Key ID) a ne tajni API kljuÄŤ. ElevenLabs kljuÄŤ mora poÄŤinjati sa 'sk_'."
+          : `ElevenLabs greĹˇka (${status}): ${errMsg}`,
         isKeyId,
       });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // Wolfram Alpha: exact formulas, computations and final answers
+  // Requires WOLFRAM_APPID in .env (free key from developer.wolframalpha.com)
+  // ------------------------------------------------------------------
+  function getWolframAppId(): string {
+    return (
+      process.env.WOLFRAM_APPID?.trim() ||
+      process.env.WOLFRAM_API_KEY?.trim() ||
+      ""
+    );
+  }
+
+  const WOLFRAM_HINTS = [
+    "izvod", "izvodi", "izraÄŤunaj", "izracunaj", "raÄŤunaj", "racunaj",
+    "reĹˇi", "resi", "jednaÄŤin", "jednacin", "_integral", "integral",
+    "derivacij", "graniÄŤna", "granicna", "limes", "logarit", "logaritm",
+    "matric", "determinant", "verovatnoÄ‡", "verovatnoc", "procent", "koliko je",
+    "calculate", "compute", "solve", "equation", "derivative", "limit",
+    "what is", "how much", "simplify", "factor", "expand", "wolfram",
+  ];
+
+  function looksLikeComputation(text: string): boolean {
+    const lower = text.toLowerCase();
+    if (WOLFRAM_HINTS.some((hint) => lower.includes(hint.replace(/^_/, "")))) {
+      return true;
+    }
+    // digits glued to math operators, powers, roots or an equals sign
+    return /[0-9]\s*[+\-*/^=]/.test(text) || /[âšâ«â‘Ď€Â˛Âł]/.test(text);
+  }
+
+  interface WolframPod {
+    title: string;
+    text: string;
+  }
+
+  interface WolframResult {
+    input: string;
+    pods: WolframPod[];
+    answer?: string;
+  }
+
+  async function queryWolfram(query: string): Promise<WolframResult | null> {
+    const appid = getWolframAppId();
+    if (!appid) return null;
+
+    try {
+      const url =
+        "https://api.wolframalpha.com/v2/query?output=JSON&format=plaintext" +
+        `&appid=${encodeURIComponent(appid)}&input=${encodeURIComponent(query)}`;
+
+      const res = await fetch(url, { signal: AbortSignal.timeout(9000) });
+      if (!res.ok) {
+        console.warn(`Wolfram Alpha responded with ${res.status}`);
+        return null;
+      }
+
+      const data = (await res.json()) as {
+        queryresult?: {
+          success?: boolean;
+          pods?: Array<{
+            title?: string;
+            primary?: boolean;
+            subpods?: Array<{ plaintext?: string }>;
+          }>;
+        };
+      };
+
+      const queryResult = data.queryresult;
+      if (!queryResult?.success || !Array.isArray(queryResult.pods)) {
+        return null;
+      }
+
+      const wanted = /^(input interpretation|result|solution|decimal approximation|value|answer|plot|number line|solutions?|roots?|derivative|integral)$/i;
+      const pods: WolframPod[] = [];
+
+      for (const pod of queryResult.pods) {
+        const title = (pod.title || "").trim();
+        if (!title) continue;
+        if (!pod.primary && !wanted.test(title)) continue;
+
+        const text = (pod.subpods || [])
+          .map((sub) => (sub.plaintext || "").trim())
+          .filter(Boolean)
+          .join("\n");
+        if (text) pods.push({ title, text });
+        if (pods.length >= 5) break;
+      }
+
+      if (pods.length === 0) return null;
+
+      const answerPod =
+        pods.find((p) => /^(result|solution|solutions|value|answer|decimal approximation|roots?)$/i.test(p.title)) ||
+        pods.find((p) => !/^input interpretation$/i.test(p.title));
+
+      return {
+        input: pods.find((p) => /^input interpretation$/i.test(p.title))?.text || query,
+        pods,
+        answer: answerPod?.text,
+      };
+    } catch (err: unknown) {
+      console.warn("Wolfram Alpha lookup failed:", err instanceof Error ? err.message : err);
+      return null;
+    }
+  }
+
+  function formatWolframMarkdown(result: WolframResult | null): string {
+    if (!result || result.pods.length === 0) return "";
+
+    const lines: string[] = ["### đź§® Wolfram Alpha â€” proveren odgovor", ""];
+
+    const answerPod = result.answer
+      ? result.pods.find((p) => p.text === result.answer)
+      : undefined;
+
+    if (result.answer && answerPod) {
+      lines.push(`**âś… Odgovor / Answer:**`, "", "```", result.answer, "```", "");
+    }
+
+    const detailPods = result.pods.filter((p) => p !== answerPod);
+    if (detailPods.length > 0) {
+      for (const pod of detailPods) {
+        lines.push(`**${pod.title}:**`, "", "```", pod.text, "```", "");
+      }
+    }
+
+    return lines.join("\n").trim();
+  }
+
+  // Public endpoint so the client can ask Wolfram directly (needs WOLFRAM_APPID)
+  app.post("/api/wolfram", async (req, res) => {
+    try {
+      const query = (typeof req.body?.query === "string" ? req.body.query : "").trim();
+      if (!query) {
+        res.status(400).json({ error: "Query is required" });
+        return;
+      }
+      if (!getWolframAppId()) {
+        res.status(503).json({ error: "WOLFRAM_APPID nije podeĹˇen u .env fajlu." });
+        return;
+      }
+
+      const result = await queryWolfram(query);
+      if (!result) {
+        res.status(404).json({ error: "Wolfram Alpha nije pronaĹˇao odgovor za ovaj upit." });
+        return;
+      }
+
+      res.json({ ...result, markdown: formatWolframMarkdown(result) });
+    } catch (err: unknown) {
+      console.error("Wolfram endpoint error:", err);
+      res.status(500).json({ error: err instanceof Error ? err.message : "Wolfram error" });
     }
   });
 
@@ -423,7 +629,6 @@ async function startServer() {
         return;
       }
 
-      const client = getGeminiClient();
       const chatHistory = Array.isArray(history) ? history : [];
 
       // Build strictly valid alternating turns starting with "user"
@@ -466,8 +671,10 @@ async function startServer() {
         "CRITICAL THINKING & REASONING RULES:\n" +
         "1. NEVER give vague, generic, empty, or evasive answers. Always deliver deep, thorough, accurate, and step-by-step explanations for ANY question or subject (STEM, math, biology, physics, coding, languages, history, philosophy, medicine, daily skills).\n" +
         "2. LANGUAGE MATCHING: You MUST ALWAYS respond in the EXACT SAME LANGUAGE as the user's message (e.g. if the user writes in Serbian/Croatian/Bosnian, reply in natural, fluent Serbian/Croatian/Bosnian; if in English, reply in English; if in German, German; etc.).\n" +
-        "3. STRUCTURE: Use clear, beautifully formatted Markdown with bold key terms, numbered steps, LaTeX/formulas where applicable, bullet points, intuitive real-world analogies, and a quick active recall check at the end to verify understanding.\n" +
-        "4. PROBLEM SOLVING: When given a math, code, or science problem, break down the derivation and solve it completely.";
+        "3. STRUCTURE: Use clear, beautifully formatted Markdown with bold key terms, numbered steps, bullet points, intuitive real-world analogies, and a quick active recall check at the end to verify understanding.\n" +
+        "4. FORMULAS: Render EVERY formula, equation, expression, matrix and mathematical notation in LaTeX so it displays correctly: inline math as $...$ (e.g. $E = mc^2$, $x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$) and standalone display math as $$...$$ on its own line. Never write raw ASCII math like a/b or sqrt(x) when LaTeX is possible. Use \\( \\) style ONLY if $ is ambiguous inside code.\n" +
+        "5. ANSWERS: For every concrete question, problem or calculation, finish with a clearly labeled final answer line in the student's language, e.g. **âś… Odgovor: ...** (or **âś… Answer: ...** in English), including units and the final value/formula. Show the full derivation BEFORE that line.\n" +
+        "6. PROBLEM SOLVING: When given a math, code, or science problem, break down the derivation and solve it completely.";
 
       if (animalTeacher && typeof animalTeacher === "object") {
         const teacherName = animalTeacher.title || animalTeacher.name || "Animal Teacher";
@@ -476,23 +683,26 @@ async function startServer() {
         systemInstruction =
           `You are ${teacherName} (${teacherRole}), an adorable, witty, inspiring animal schoolteacher in the student's classroom!\n` +
           `TEACHER PERSONA & CLASSROOM RULES:\n` +
-          `1. Speak warmly and authentically in character as this cute animal teacher (${animalTeacher.emoji || "🐾"}).\n` +
+          `1. Speak warmly and authentically in character as this cute animal teacher (${animalTeacher.emoji || "đźľ"}).\n` +
           `2. Your catchphrase: "${catchphrase}".\n` +
           `3. As a true teacher in class: Explain clearly, praise good effort, give constructive tips, and at the end of your message ALWAYS ask the student a thoughtful, engaging question to test what they understood (just like being called to the board in class)!\n` +
           `4. Keep the exact language of the student (Serbian/Croatian/Bosnian if they speak that language, English if English, etc.).\n` +
-          `5. Deliver deep, accurate academic explanations without any dumbing down, paired with cute animal charm!`;
+          `5. Deliver deep, accurate academic explanations without any dumbing down, paired with cute animal charm!\n` +
+          `6. Write every formula in LaTeX ($...$ inline, $$...$$ for display) and always end a concrete problem with a bold final answer line such as **âś… Odgovor: ...**.`;
       }
 
+      // Ask Wolfram Alpha in parallel for exact computations / formulas
+      const wolframPromise: Promise<WolframResult | null> = looksLikeComputation(cleanMessage)
+        ? queryWolfram(cleanMessage)
+        : Promise.resolve(null);
+
       let responseText = "";
-      const modelCandidates = [
-        "gemini-3.1-flash-lite",
-        "gemini-flash-latest",
-        "gemini-3.7-flash",
-      ];
+      const modelCandidates = [GEMINI_MODEL];
 
       let lastError: unknown = null;
       for (const modelName of modelCandidates) {
         try {
+          const client = getGeminiClient();
           const response = await client.models.generateContent({
             model: modelName,
             contents: turns,
@@ -506,15 +716,27 @@ async function startServer() {
           }
         } catch (modelErr) {
           lastError = modelErr;
-          console.warn(`Model ${modelName} failed, trying next candidate:`, modelErr);
+          console.warn(`Model ${modelName} generation failed:`, modelErr);
         }
       }
 
-      if (!responseText && lastError) {
-        throw lastError;
+      const wolframAnswer = await wolframPromise;
+      const wolframBlock = formatWolframMarkdown(wolframAnswer);
+
+      // Gemini unavailable (no key / quota / network) â†’ Wolfram can still answer
+      if (!responseText) {
+        if (wolframBlock) {
+          res.json({ reply: wolframBlock, source: "wolfram" });
+          return;
+        }
+        throw lastError || new Error("AI model nije vratio odgovor. Proveri GEMINI_API_KEY u .env fajlu.");
       }
 
-      res.json({ reply: responseText });
+      // Attach the verified Wolfram computation / answer to the AI explanation
+      res.json({
+        reply: wolframBlock ? `${responseText}\n\n---\n\n${wolframBlock}` : responseText,
+        source: wolframBlock ? "gemini+wolfram" : "gemini",
+      });
     } catch (err: unknown) {
       console.error("AI Chat error:", err);
       const errMsg = err instanceof Error ? err.message : "Internal AI Error";
@@ -528,7 +750,7 @@ async function startServer() {
       const {
         action = "start",
         animalTeacher,
-        subject = "Opšte gradivo",
+        subject = "OpĹˇte gradivo",
         topic = "Lekcija",
         classMode = "oral_exam",
         currentQuestionNumber = 1,
@@ -540,9 +762,9 @@ async function startServer() {
 
       const client = getGeminiClient();
 
-      const teacherName = animalTeacher?.title || "Profesor Feliks 🦊";
+      const teacherName = animalTeacher?.title || "Profesor Feliks đź¦Š";
       const teacherSpecies = animalTeacher?.species || "Pametni Lisac";
-      const rewardItem = animalTeacher?.rewardItem || "Zlatna Šargarepica 🥕";
+      const rewardItem = animalTeacher?.rewardItem || "Zlatna Ĺ argarepica đźĄ•";
 
       const isSr = language.startsWith("sr") || language.startsWith("hr") || language.startsWith("bs");
 
@@ -551,7 +773,7 @@ async function startServer() {
 SUBJECT: "${subject}"
 TOPIC / LESSON: "${topic}"
 CLASS FORMAT: ${classMode} (Question 1 of ${totalQuestions})
-LANGUAGE: Respond strictly in ${isSr ? "Serbian (Latinica, prirodan i šarmantan profesorski ton)" : "English"}.
+LANGUAGE: Respond strictly in ${isSr ? "Serbian (Latinica, prirodan i Ĺˇarmantan profesorski ton)" : "English"}.
 
 TASK:
 1. Greet the student to the classroom / blackboard warmly in character as ${teacherName}. Feel free to include 1-2 natural spoken emotion tags (e.g. [warmly], [excitedly], [chuckles], [gently]) in the welcomeMessage for expressive ElevenLabs TTS audio.
@@ -567,7 +789,7 @@ Return STRICT JSON matching this schema:
 }`;
 
         let raw = "";
-        const modelCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"];
+        const modelCandidates = [GEMINI_MODEL];
         for (const m of modelCandidates) {
           try {
             const resp = await client.models.generateContent({
@@ -587,17 +809,17 @@ Return STRICT JSON matching this schema:
         try {
           const parsed = JSON.parse(raw);
           res.json({
-            welcomeMessage: parsed.welcomeMessage || `Dobrodošao/la na čas! Ja sam ${teacherName}. Danas proveravamo tvoje znanje iz teme: ${topic}.`,
-            question: parsed.question || `Objasni svojim rečima suštinu teme: ${topic} i navedi ključni primer.`,
+            welcomeMessage: parsed.welcomeMessage || `DobrodoĹˇao/la na ÄŤas! Ja sam ${teacherName}. Danas proveravamo tvoje znanje iz teme: ${topic}.`,
+            question: parsed.question || `Objasni svojim reÄŤima suĹˇtinu teme: ${topic} i navedi kljuÄŤni primer.`,
             hint: parsed.hint || `Seti se osnovne definicije i kako to izgleda u praksi.`,
-            animalReaction: parsed.animalReaction || `${teacherName} posmatra s osmehom i čeka tvoj odgovor.`,
+            animalReaction: parsed.animalReaction || `${teacherName} posmatra s osmehom i ÄŤeka tvoj odgovor.`,
           });
         } catch {
           res.json({
-            welcomeMessage: `Dobrodošao/la na čas! Ja sam ${teacherName}. Danas te ja ispitujem temu "${topic}". Pokaži mi šta znaš!`,
-            question: `Za početak ispitivanja: Koja je osnovna definicija i ključni značaj za "${topic}"?`,
-            hint: `Razmisli o osnovnim pojmovima i čemu to služi u stvarnom svetu.`,
-            animalReaction: `${teacherName} pažljivo namešta beležnicu i čeka tvoj odgovor.`,
+            welcomeMessage: `DobrodoĹˇao/la na ÄŤas! Ja sam ${teacherName}. Danas te ja ispitujem temu "${topic}". PokaĹľi mi Ĺˇta znaĹˇ!`,
+            question: `Za poÄŤetak ispitivanja: Koja je osnovna definicija i kljuÄŤni znaÄŤaj za "${topic}"?`,
+            hint: `Razmisli o osnovnim pojmovima i ÄŤemu to sluĹľi u stvarnom svetu.`,
+            animalReaction: `${teacherName} paĹľljivo nameĹˇta beleĹľnicu i ÄŤeka tvoj odgovor.`,
           });
         }
         return;
@@ -616,7 +838,7 @@ LANGUAGE: Respond strictly in ${isSr ? "Serbian (Latinica)" : "English"}.
 
 TASK:
 1. Rigorously evaluate the accuracy, depth, and clarity of the student's answer.
-2. Assign a score from 0 to 100, and a grade (e.g. "5 (Odličan)", "4 (Vrlo dobar)", "3 (Dobar)", "2 (Dovoljan)", or "1 (Nedovoljan)").
+2. Assign a score from 0 to 100, and a grade (e.g. "5 (OdliÄŤan)", "4 (Vrlo dobar)", "3 (Dobar)", "2 (Dovoljan)", or "1 (Nedovoljan)").
 3. Provide constructive, warm teacher feedback explaining what was great and what could be added or corrected. You may include 1-2 expressive spoken emotion tags (e.g. [proudly], [excitedly], [thoughtfully], [gently], [chuckles]) in the feedback so spoken TTS sounds full of life.
 4. Give an adorable animal teacher reaction (mentioning their tail, paws, glasses, or expressions).
 5. If score >= 60, award the ${rewardItem}!
@@ -625,7 +847,7 @@ TASK:
 Return STRICT JSON matching this schema:
 {
   "score": number between 0 and 100,
-  "grade": "e.g. 5 (Odličan)",
+  "grade": "e.g. 5 (OdliÄŤan)",
   "isCorrect": boolean,
   "feedback": "Detailed, encouraging feedback with optional emotion tags explaining the concept and correction",
   "animalReaction": "Cute physical reaction by the animal teacher",
@@ -636,7 +858,7 @@ Return STRICT JSON matching this schema:
 }`;
 
         let raw = "";
-        const modelCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"];
+        const modelCandidates = [GEMINI_MODEL];
         for (const m of modelCandidates) {
           try {
             const resp = await client.models.generateContent({
@@ -657,28 +879,28 @@ Return STRICT JSON matching this schema:
           const parsed = JSON.parse(raw);
           res.json({
             score: typeof parsed.score === "number" ? parsed.score : 85,
-            grade: parsed.grade || "5 (Odličan)",
+            grade: parsed.grade || "5 (OdliÄŤan)",
             isCorrect: parsed.isCorrect ?? (parsed.score >= 60),
-            feedback: parsed.feedback || "Odlično razmišljanje! Odgovor pogađa suštinu.",
+            feedback: parsed.feedback || "OdliÄŤno razmiĹˇljanje! Odgovor pogaÄ‘a suĹˇtinu.",
             animalReaction: parsed.animalReaction || `${teacherName} zadovoljno klima glavom!`,
             rewardEarned: parsed.rewardEarned ?? true,
             rewardItem,
-            nextQuestion: parsed.nextQuestion || (isFinal ? "" : `Sledeće pitanje: Kako se ${topic} povezuje sa praktičnom primenom?`),
-            nextQuestionHint: parsed.nextQuestionHint || "Razmisli o primerima iz svakodnevnog života.",
+            nextQuestion: parsed.nextQuestion || (isFinal ? "" : `SledeÄ‡e pitanje: Kako se ${topic} povezuje sa praktiÄŤnom primenom?`),
+            nextQuestionHint: parsed.nextQuestionHint || "Razmisli o primerima iz svakodnevnog Ĺľivota.",
             isFinalQuestion: isFinal,
           });
         } catch {
           const score = studentAnswer.trim().length > 15 ? 88 : 65;
-          const grade = score >= 85 ? "5 (Odličan)" : score >= 70 ? "4 (Vrlo dobar)" : "3 (Dobar)";
+          const grade = score >= 85 ? "5 (OdliÄŤan)" : score >= 70 ? "4 (Vrlo dobar)" : "3 (Dobar)";
           res.json({
             score,
             grade,
             isCorrect: score >= 60,
-            feedback: `Jako lep odgovor! Jasno je da razumeš osnovne mehanizme za temu "${topic}".`,
-            animalReaction: `${teacherName} ti pruža ${rewardItem} uz širok osmeh!`,
+            feedback: `Jako lep odgovor! Jasno je da razumeĹˇ osnovne mehanizme za temu "${topic}".`,
+            animalReaction: `${teacherName} ti pruĹľa ${rewardItem} uz Ĺˇirok osmeh!`,
             rewardEarned: true,
             rewardItem,
-            nextQuestion: isFinal ? "" : `Pitanje #${currentQuestionNumber + 1}: Koji je sledeći ključni korak ili pravilo u ovoj oblasti?`,
+            nextQuestion: isFinal ? "" : `Pitanje #${currentQuestionNumber + 1}: Koji je sledeÄ‡i kljuÄŤni korak ili pravilo u ovoj oblasti?`,
             nextQuestionHint: "Fokusiraj se na redosled koraka.",
             isFinalQuestion: isFinal,
           });
@@ -688,7 +910,7 @@ Return STRICT JSON matching this schema:
 
       if (action === "finish") {
         const { turns = [] } = req.body;
-        const prompt = `You are ${teacherName} (${teacherSpecies}), concluding an oral classroom examination and writing the final Report Card (Đačka knjižica / Svedočanstvo).
+        const prompt = `You are ${teacherName} (${teacherSpecies}), concluding an oral classroom examination and writing the final Report Card (ÄaÄŤka knjiĹľica / SvedoÄŤanstvo).
 SUBJECT: "${subject}"
 TOPIC: "${topic}"
 EXAM TURNS: ${JSON.stringify(turns.slice(-6))}
@@ -703,7 +925,7 @@ TASK:
 
 Return STRICT JSON matching this schema:
 {
-  "finalGrade": "e.g. 5 (Odličan)",
+  "finalGrade": "e.g. 5 (OdliÄŤan)",
   "averageScore": number,
   "finalVerdict": "2-3 paragraphs of thorough, uplifting teacher evaluation",
   "keyStrengths": ["array of mastered concepts"],
@@ -712,7 +934,7 @@ Return STRICT JSON matching this schema:
 }`;
 
         let raw = "";
-        const modelCandidates = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"];
+        const modelCandidates = [GEMINI_MODEL];
         for (const m of modelCandidates) {
           try {
             const resp = await client.models.generateContent({
@@ -732,21 +954,21 @@ Return STRICT JSON matching this schema:
         try {
           const parsed = JSON.parse(raw);
           res.json({
-            finalGrade: parsed.finalGrade || "5 (Odličan)",
+            finalGrade: parsed.finalGrade || "5 (OdliÄŤan)",
             averageScore: typeof parsed.averageScore === "number" ? parsed.averageScore : 92,
-            finalVerdict: parsed.finalVerdict || `Čestitam na uspešno završenom ispitivanju! Pokazao/la si zrelo razumevanje gradiva iz teme "${topic}".`,
-            keyStrengths: Array.isArray(parsed.keyStrengths) && parsed.keyStrengths.length > 0 ? parsed.keyStrengths : ["Razumevanje suštine", "Samouvereno izlaganje"],
+            finalVerdict: parsed.finalVerdict || `ÄŚestitam na uspeĹˇno zavrĹˇenom ispitivanju! Pokazao/la si zrelo razumevanje gradiva iz teme "${topic}".`,
+            keyStrengths: Array.isArray(parsed.keyStrengths) && parsed.keyStrengths.length > 0 ? parsed.keyStrengths : ["Razumevanje suĹˇtine", "Samouvereno izlaganje"],
             topicsToReview: Array.isArray(parsed.topicsToReview) ? parsed.topicsToReview : ["Obnoviti sitne detalje i definicije"],
-            diplomaPraise: parsed.diplomaPraise || `Ponos mog razreda! Samo tako nastavi! 🎓`,
+            diplomaPraise: parsed.diplomaPraise || `Ponos mog razreda! Samo tako nastavi! đźŽ“`,
           });
         } catch {
           res.json({
-            finalGrade: "5 (Odličan)",
+            finalGrade: "5 (OdliÄŤan)",
             averageScore: 90,
-            finalVerdict: `Čestitam! Uspešno si završio/la ispitivanje pred tablom za temu "${topic}". Tvoji odgovori su bili jasni, logični i sa puno razumevanja.`,
-            keyStrengths: ["Definisanje ključnih pojmova", "Povezivanje gradiva"],
-            topicsToReview: ["Uvežbati dodatne primere za maksimalnu sigurnost"],
-            diplomaPraise: `Čista petica! Zaslužio/la si zvanje pravog malog stručnjaka! 🐾`,
+            finalVerdict: `ÄŚestitam! UspeĹˇno si zavrĹˇio/la ispitivanje pred tablom za temu "${topic}". Tvoji odgovori su bili jasni, logiÄŤni i sa puno razumevanja.`,
+            keyStrengths: ["Definisanje kljuÄŤnih pojmova", "Povezivanje gradiva"],
+            topicsToReview: ["UveĹľbati dodatne primere za maksimalnu sigurnost"],
+            diplomaPraise: `ÄŚista petica! ZasluĹľio/la si zvanje pravog malog struÄŤnjaka! đźľ`,
           });
         }
         return;
@@ -783,11 +1005,7 @@ CRITICAL RULES:
    - "fullNotes": (markdown string with detailed structured sections, explanations, step-by-step guidance, and active recall review questions).`;
 
       let raw = "";
-      const noteModelCandidates = [
-        "gemini-3.1-flash-lite",
-        "gemini-flash-latest",
-        "gemini-3.7-flash",
-      ];
+      const noteModelCandidates = [GEMINI_MODEL];
 
       for (const modelName of noteModelCandidates) {
         try {
@@ -828,266 +1046,6 @@ CRITICAL RULES:
       console.error("AI Notes error:", err);
       const errMsg = err instanceof Error ? err.message : "Internal Notes Generation Error";
       res.status(500).json({ error: errMsg });
-    }
-  });
-
-  // Server-side PDF Notes AI Verification Pipeline
-  app.post("/api/ai/verify-pdf-notes", async (req, res) => {
-    try {
-      const { title, subject, pageCount = 1, extractedSamples = "", fileName = "notes.pdf" } = req.body;
-      const cleanTitle = (typeof title === "string" ? title : "Study Notes").trim();
-      const cleanSubject = (typeof subject === "string" ? subject : "General").trim();
-      const numPages = typeof pageCount === "number" ? pageCount : parseInt(pageCount, 10) || 1;
-      const textSample = (typeof extractedSamples === "string" ? extractedSamples : "").slice(0, 15000).trim();
-
-      const client = getGeminiClient();
-
-      const verificationPrompt = `You are the Lead Academic Quality & Fact-Checking AI Officer at Study Buddy.
-Your task is to conduct a rigorous, expert-level academic audit of a student-submitted PDF study document (which may range from a few pages to 300+ pages) for publication on the Student Community Notes Market.
-
-DOCUMENT METADATA:
-- Title: "${cleanTitle}"
-- Subject / Field: "${cleanSubject}"
-- Total Pages: ${numPages}
-- File Name: "${fileName}"
-
-EXTRACTED TEXT SAMPLES ACROSS DOCUMENT (Sampled sections, chapters, TOC, formulas, definitions):
-"""
-${textSample || "No text samples extracted or visual diagram pages."}
-"""
-
-YOUR AUDIT MANDATES:
-1. FACTUAL & CONCEPTUAL ACCURACY:
-   - Check if formulas, laws, definitions, proofs, historical dates, or programming logic in the samples are scientifically and academically sound.
-   - Detect if there are blatant falsehoods, invented nonsense, corrupted gibberish, or severe misconceptions.
-2. REASONABLE THRESHOLD:
-   - Authentic, student-written lecture summaries, exam cheat-sheets, or textbook guides with coherent explanations should be APPROVED (accuracyScore >= 75).
-   - If the material is completely nonsensical, spam, empty, or filled with critical errors, REJECT it (accuracyScore < 75).
-3. MULTI-PAGE RESPECT:
-   - Acknowledge the multi-page scale (${numPages} pages).
-4. RETURN JSON strictly matching this schema:
-{
-  "status": "approved" or "rejected",
-  "verified": true or false,
-  "accuracyScore": number between 0 and 100,
-  "verdictSummary": "2-3 sentences explaining the verification findings in the exact language of the notes (e.g. Serbian if notes are in Serbian, English if in English)",
-  "correctionsOrIssues": ["array of detected inaccuracies, missing sections, or suggestions for the student"],
-  "strengths": ["array of 2-4 strong points of these notes"],
-  "topicsCovered": ["array of 3-6 core topics/chapters detected in the document"],
-  "pageCount": ${numPages}
-}`;
-
-      let rawResponse = "";
-      const modelCandidates = [
-        "gemini-3.1-flash-lite",
-        "gemini-flash-latest",
-        "gemini-3.7-flash",
-      ];
-
-      for (const modelName of modelCandidates) {
-        try {
-          const response = await client.models.generateContent({
-            model: modelName,
-            contents: verificationPrompt,
-            config: {
-              responseMimeType: "application/json",
-            },
-          });
-          if (response.text && response.text.trim()) {
-            rawResponse = response.text;
-            break;
-          }
-        } catch (modelErr) {
-          console.warn(`Model ${modelName} verification failed, trying next candidate:`, modelErr);
-        }
-      }
-
-      if (!rawResponse) {
-        // Fallback rule-based verification if external API offline
-        const isSuspicious = textSample.length < 20 || /spam|asdfghjkl|fake notes/i.test(textSample);
-        const score = isSuspicious ? 45 : 92;
-        const status = score >= 75 ? "approved" : "rejected";
-        res.json({
-          status,
-          verified: status === "approved",
-          accuracyScore: score,
-          verdictSummary:
-            status === "approved"
-              ? `AI pregled je potvrdio akademsku tačnost i strukturu za "${cleanTitle}" (${numPages} str.). Materijal zadovoljava visoke standarde kvaliteta.`
-              : `Materijal nije odobren jer sadrži nedovoljno proverljivog akademskog sadržaja ili potencijalne greške.`,
-          correctionsOrIssues:
-            status === "approved"
-              ? ["Preporučuje se periodično dopunjavanje novim ispitnim rokovima."]
-              : ["Uočene su nepravilnosti ili premalo validnog teksta u ekstraktovanim uzorcima."],
-          strengths: ["Detaljna pokrivenost oblasti", "Jasna struktura i definicije"],
-          topicsCovered: [cleanSubject, "Teorijske osnove", "Primeri i zadaci"],
-          pageCount: numPages,
-          verifiedAt: new Date().toISOString(),
-        });
-        return;
-      }
-
-      try {
-        const parsed = JSON.parse(rawResponse);
-        const isApproved = parsed.status === "approved" && (parsed.accuracyScore ?? 80) >= 70;
-        res.json({
-          status: isApproved ? "approved" : "rejected",
-          verified: isApproved,
-          accuracyScore: typeof parsed.accuracyScore === "number" ? parsed.accuracyScore : isApproved ? 90 : 50,
-          verdictSummary: parsed.verdictSummary || (isApproved ? "AI pregled je uspešno odobrio skriptu." : "Skripta je odbijena zbog netačnosti."),
-          correctionsOrIssues: Array.isArray(parsed.correctionsOrIssues) ? parsed.correctionsOrIssues : [],
-          strengths: Array.isArray(parsed.strengths) ? parsed.strengths : ["Dobra organizacija gradiva"],
-          topicsCovered: Array.isArray(parsed.topicsCovered) && parsed.topicsCovered.length > 0 ? parsed.topicsCovered : [cleanSubject],
-          pageCount: numPages,
-          verifiedAt: new Date().toISOString(),
-        });
-      } catch {
-        res.json({
-          status: "approved",
-          verified: true,
-          accuracyScore: 88,
-          verdictSummary: `AI verifikacija uspešno završena za "${cleanTitle}" (${numPages} str.).`,
-          correctionsOrIssues: [],
-          strengths: ["Konzistentna struktura"],
-          topicsCovered: [cleanSubject],
-          pageCount: numPages,
-          verifiedAt: new Date().toISOString(),
-        });
-      }
-    } catch (err: unknown) {
-      console.error("PDF Verification error:", err);
-      const errMsg = err instanceof Error ? err.message : "PDF Verification Error";
-      res.status(500).json({ error: errMsg });
-    }
-  });
-
-  // In-memory / persistent Community Market Notes API
-  interface MarketNoteServer {
-    id: string;
-    title: string;
-    subject: string;
-    authorId: string;
-    authorName: string;
-    authorAvatar?: string;
-    description: string;
-    fileName: string;
-    fileSize: number;
-    pageCount: number;
-    pdfDataUrl?: string;
-    verification: {
-      status: "approved" | "rejected";
-      verified: boolean;
-      accuracyScore: number;
-      verdictSummary: string;
-      correctionsOrIssues: string[];
-      topicsCovered: string[];
-      pageCount: number;
-      verifiedAt?: string;
-      strengths?: string[];
-    };
-    upvotes: number;
-    upvotedBy: string[];
-    downloadsCount: number;
-    tags: string[];
-    createdAt: string;
-  }
-
-  const serverMarketNotes: MarketNoteServer[] = [];
-
-  app.get("/api/market/notes", (_req, res) => {
-    res.json({ notes: serverMarketNotes });
-  });
-
-  app.post("/api/market/notes", (req, res) => {
-    try {
-      const note = req.body;
-      if (!note || !note.title || !note.verification) {
-        res.status(400).json({ error: "Invalid note payload" });
-        return;
-      }
-      if (note.verification.status !== "approved" || !note.verification.verified) {
-        res.status(400).json({
-          error: "Samo beleške koje je AI verifikovao i odobrio mogu biti objavljene na tržištu.",
-        });
-        return;
-      }
-
-      // Check if already exists
-      const existingIdx = serverMarketNotes.findIndex((n) => n.id === note.id);
-      if (existingIdx >= 0) {
-        serverMarketNotes[existingIdx] = note;
-      } else {
-        serverMarketNotes.unshift(note);
-      }
-
-      res.json({ success: true, note });
-    } catch (err: unknown) {
-      console.error("Market post error:", err);
-      res.status(500).json({ error: "Failed to publish note to market" });
-    }
-  });
-
-  app.post("/api/market/notes/:id/upvote", (req, res) => {
-    try {
-      const { id } = req.params;
-      const { userId = "guest" } = req.body;
-      const target = serverMarketNotes.find((n) => n.id === id);
-      if (!target) {
-        res.status(404).json({ error: "Note not found" });
-        return;
-      }
-      target.upvotedBy = target.upvotedBy || [];
-      const hasUpvoted = target.upvotedBy.includes(userId);
-      if (hasUpvoted) {
-        target.upvotedBy = target.upvotedBy.filter((u) => u !== userId);
-        target.upvotes = Math.max(0, target.upvotes - 1);
-      } else {
-        target.upvotedBy.push(userId);
-        target.upvotes += 1;
-      }
-      res.json({ upvotes: target.upvotes, upvoted: !hasUpvoted });
-    } catch {
-      res.status(500).json({ error: "Failed to upvote" });
-    }
-  });
-
-  app.delete("/api/market/notes/:id", (req, res) => {
-    try {
-      const { id } = req.params;
-      const idx = serverMarketNotes.findIndex((n) => n.id === id);
-      if (idx >= 0) {
-        serverMarketNotes.splice(idx, 1);
-        res.json({ success: true });
-      } else {
-        res.status(404).json({ error: "Not found" });
-      }
-    } catch {
-      res.status(500).json({ error: "Failed to delete" });
-    }
-  });
-
-  app.patch("/api/market/notes/author", (req, res) => {
-    try {
-      const { authorId, authorName, authorAvatar } = req.body;
-      if (!authorId || !authorName) {
-        res.status(400).json({ error: "authorId and authorName are required" });
-        return;
-      }
-      let updatedCount = 0;
-      const cleanName = String(authorName).trim();
-      serverMarketNotes.forEach((n) => {
-        if (n.authorId === authorId) {
-          n.authorName = cleanName;
-          if (authorAvatar !== undefined) {
-            n.authorAvatar = authorAvatar;
-          }
-          updatedCount++;
-        }
-      });
-      res.json({ success: true, updatedCount });
-    } catch (err) {
-      console.error("Failed to update author notes:", err);
-      res.status(500).json({ error: "Failed to update author notes" });
     }
   });
 

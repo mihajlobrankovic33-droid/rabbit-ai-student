@@ -410,8 +410,10 @@ ${activeSession.turns
   .join("\n---\n")}`;
 
     saveNote({
+      id: `note-classroom-${Date.now()}`,
       title: `[Učionica] ${activeSession.topic} - Ocena ${activeSession.finalGrade || "5"}`,
       topic: activeSession.subject,
+      createdAt: new Date().toISOString(),
       content: {
         title: activeSession.topic,
         keyPoints: keyPoints.length > 0 ? keyPoints : ["Pregled ispitivanja"],

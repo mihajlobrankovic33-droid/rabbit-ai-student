@@ -26,7 +26,6 @@ import {
   Wifi,
   WifiOff,
   X,
-  ShoppingBag,
   Edit3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -69,8 +68,6 @@ interface HamburgerMenuProps {
   onDeleteNote?: (id: string) => void;
   onOpenNotesTab?: () => void;
   onOpenClassroomTab?: () => void;
-  onOpenLibraryTab?: () => void;
-  onOpenMarketTab?: () => void;
   // Focus Timer
   timerSeconds?: number;
   timerActive?: boolean;
@@ -95,8 +92,6 @@ export function HamburgerMenu({
   onDeleteNote,
   onOpenNotesTab,
   onOpenClassroomTab,
-  onOpenLibraryTab,
-  onOpenMarketTab,
   timerSeconds = 25 * 60,
   timerActive = false,
   timerMode = "focus",
@@ -362,31 +357,6 @@ export function HamburgerMenu({
                   >
                     <GraduationCap className="h-3.5 w-3.5 text-primary" />
                     <span>Studio</span>
-                  </button>
-                )}
-                {onOpenMarketTab && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onOpenMarketTab();
-                      onClose();
-                    }}
-                    className="flex cursor-pointer items-center gap-1 rounded-xl bg-card border border-border/70 px-2.5 py-1 text-xs font-bold text-foreground transition-all hover:bg-muted hover:text-primary"
-                  >
-                    <ShoppingBag className="h-3.5 w-3.5 text-primary" />
-                    <span>Market</span>
-                  </button>
-                )}
-                {onOpenLibraryTab && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onOpenLibraryTab();
-                      onClose();
-                    }}
-                    className="flex cursor-pointer items-center gap-1 rounded-xl bg-card border border-border/70 px-2.5 py-1 text-xs font-bold text-foreground transition-all hover:bg-muted hover:text-primary"
-                  >
-                    <span>Biblioteka</span>
                   </button>
                 )}
               </div>

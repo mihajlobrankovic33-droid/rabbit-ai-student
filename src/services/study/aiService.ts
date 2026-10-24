@@ -97,18 +97,22 @@ export async function generateChatResponse(
   const lower = clean.toLowerCase();
   const provider = getSelectedAIProvider();
 
-  // 1. If user chose Gemini Cloud AI (Primary / Deep Thinking)
+  let serverError: unknown = null;
+
+  // 1. Server brain: Gemini cloud AI (+ Wolfram Alpha for exact calculations)
   if (provider === "gemini") {
     try {
       const reply = await callServerChat(clean, history, signal, animalTeacher);
       if (reply && reply.trim().length > 0) {
         return reply;
       }
+      serverError = new Error("Server nije vratio odgovor.");
     } catch (err: unknown) {
       if (signal?.aborted) {
         return "*(Generation was stopped)*";
       }
-      console.warn("Gemini cloud brain failed, falling back:", err);
+      serverError = err;
+      console.warn("Server AI chat failed:", err);
     }
   }
 
@@ -134,28 +138,34 @@ export async function generateChatResponse(
       console.warn("In-browser engine fallback triggered:", inBrowserErr);
     }
 
-    // Seamlessly answer with server AI
+    // Browser engine unavailable → let the server brain answer instead
     try {
       const reply = await callServerChat(clean, history, signal, animalTeacher);
       if (reply && reply.trim().length > 0) {
         return reply;
       }
+      serverError = new Error("Server nije vratio odgovor.");
     } catch (err: unknown) {
+      serverError = err;
       console.warn("Server AI chat fallback triggered:", err);
     }
   }
 
-  // 4. Default fallback: Server AI Brain
-  try {
-    const reply = await callServerChat(clean, history, signal, animalTeacher);
-    if (reply && reply.trim().length > 0) {
-      return reply;
-    }
-  } catch (err: unknown) {
-    if (signal?.aborted) {
-      return "*(Generation was stopped)*";
-    }
-    console.warn("Server AI chat fallback triggered:", err);
+  // 3. Pure offline mode: never touch the network
+  if (provider === "builtin_offline") {
+    return generateDynamicBuiltinResponse(clean, lower);
+  }
+
+  // 4. If the server reported a missing API key, explain it instead of faking an answer
+  const serverMessage = serverError instanceof Error ? serverError.message : String(serverError ?? "");
+  if (/GEMINI_API_KEY|api[_ ]?key|ključ|API_KEY/i.test(serverMessage)) {
+    return (
+      "⚠️ **AI mozak nije povezan — nedostaje GEMINI_API_KEY.**\n\n" +
+      "Da bi chat radio, napravi `.env` fajl u korenu projekta i upiši:\n\n" +
+      "```\nGEMINI_API_KEY=tvoj_ključ\nWOLFRAM_APPID=tvoj_wolfram_ključ\n```\n\n" +
+      "zatim restartuj server (`npm run dev`).\n\n" +
+      "_The AI cloud brain is offline: add `GEMINI_API_KEY` (and optionally `WOLFRAM_APPID` for exact math answers) to `.env`, then restart the server._"
+    );
   }
 
   // 5. Final Fallback: Intelligent offline generator
@@ -375,13 +385,15 @@ export async function generateStudyNotes(
     }
   }
 
-  // 4. Server-side Gemini AI Notes endpoint (General fallback)
-  try {
-    const serverNotes = await callServerNotes(displayTitle, displayTopic, signal);
-    return { content: serverNotes };
-  } catch (err: unknown) {
-    if (signal?.aborted) throw new Error("Notes generation stopped");
-    console.warn("Server AI notes fallback triggered:", err);
+  // 3. Server-side Gemini AI Notes endpoint (only when a cloud/broken engine was requested)
+  if (provider !== "builtin_offline") {
+    try {
+      const serverNotes = await callServerNotes(displayTitle, displayTopic, signal);
+      return { content: serverNotes };
+    } catch (err: unknown) {
+      if (signal?.aborted) throw new Error("Notes generation stopped");
+      console.warn("Server AI notes fallback triggered:", err);
+    }
   }
 
   // 4. Built-in dynamic notes generator (Offline)

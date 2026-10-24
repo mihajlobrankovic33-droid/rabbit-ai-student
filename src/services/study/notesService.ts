@@ -46,7 +46,7 @@ export function getNotes(userId?: string): Note[] {
 
     return parsed.map((n) => {
       // Handle potential double nesting e.g. { content: { content: ... } }
-      let contentObj = (n.content || {}) as Record<string, unknown>;
+      let contentObj = (n.content || {}) as unknown as Record<string, unknown>;
       if (contentObj && typeof contentObj === "object" && "content" in contentObj && contentObj.content) {
         contentObj = (contentObj.content || {}) as Record<string, unknown>;
       }
@@ -80,7 +80,7 @@ export function saveNote(note: Note, userId?: string): void {
     const key = getNotesStorageKey(uid);
     const existing = getNotes(uid);
 
-    let contentObj = (note.content || {}) as Record<string, unknown>;
+    let contentObj = (note.content || {}) as unknown as Record<string, unknown>;
     if (contentObj && typeof contentObj === "object" && "content" in contentObj && contentObj.content) {
       contentObj = (contentObj.content || {}) as Record<string, unknown>;
     }

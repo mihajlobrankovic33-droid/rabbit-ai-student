@@ -15,6 +15,9 @@ import {
   createSpeechRecognizer,
 } from "@/services/study/animalTeacherService";
 import Markdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import {
   ArrowRight,
   BookMarked,
@@ -233,24 +236,34 @@ export function ChatView({
       textareaRef.current.style.height = "auto";
     }
 
+    let reply: string;
     try {
-      const reply = await chatWithAI(
-        textToSend,
-        newMessages,
-        animalTeacherMode ? activeTeacher : undefined
-      );
+      reply = await chatWithAI(textToSend, newMessages, activeTeacher);
+    } catch (err: unknown) {
+      console.warn("Chat error:", err);
+      const reason =
+        err instanceof Error && err.name === "AbortError"
+          ? "*(Generisanje je zaustavljeno)*"
+          : "⚠️ **Došlo je do greške prilikom odgovora.**\n\nProveri da li je `GEMINI_API_KEY` podešen u `.env` fajlu i pokušaj ponovo.";
       const assistantMsg: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
-        content: reply,
+        content: reason,
         createdAt: new Date().toISOString(),
       };
-      const finalMessages = [...newMessages, assistantMsg];
-      setMessages(finalMessages);
-      onSaveSession?.(finalMessages);
-    } catch (err: unknown) {
-      console.warn("Chat error:", err);
+      setMessages([...newMessages, assistantMsg]);
+      return;
     }
+
+    const assistantMsg: ChatMessage = {
+      id: `assistant-${Date.now()}`,
+      role: "assistant",
+      content: reply || "*(Prazan odgovor)*",
+      createdAt: new Date().toISOString(),
+    };
+    const finalMessages = [...newMessages, assistantMsg];
+    setMessages(finalMessages);
+    onSaveSession?.(finalMessages);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -293,7 +306,7 @@ export function ChatView({
       .map(
         (m) =>
           `[${m.role === "user" ? "Student" : "Study Buddy AI"}] (${new Date(
-            m.createdAt
+            m.createdAt || Date.now()
           ).toLocaleTimeString()}):\n${m.content}\n\n`
       )
       .join("---\n\n");
@@ -376,7 +389,7 @@ export function ChatView({
                   {currentProvider === "gemini" && (
                     <>
                       <Sparkles className="h-3 w-3 text-primary animate-pulse" />
-                      <span>Gemini Thinking</span>
+                      <span>Gemini Flash</span>
                     </>
                   )}
                   {currentProvider === "in_browser" && (
@@ -529,7 +542,9 @@ export function ChatView({
                     <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                   ) : (
                     <div className="markdown-chat-content font-normal text-[13px] sm:text-[13.5px] break-words">
-                      <Markdown>{msg.content}</Markdown>
+                      <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                        {msg.content}
+                      </Markdown>
                     </div>
                   )}
                 </div>

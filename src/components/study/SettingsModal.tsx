@@ -401,11 +401,11 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-bold text-sm text-foreground">Gemini AI</span>
                     <span className="rounded-md bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">
-                      Deep Thinking
+                      gemini-flash-latest
                     </span>
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Fastest, most thoughtful AI reasoning across STEM, languages, and deep homework steps.
+                    The one model that works: fast, multilingual reasoning across STEM, languages and homework — with LaTeX formulas and exact Wolfram Alpha answers.
                   </p>
                 </button>
 
@@ -458,13 +458,13 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-foreground">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-primary" />
-                  <span className="font-bold">Gemini Deep Thinking AI Active</span>
+                  <span className="font-bold">Gemini Flash AI Active</span>
                   <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
                     Online & Ready
                   </span>
                 </div>
                 <p className="text-muted-foreground leading-relaxed">
-                  Study Buddy leverages deep AI reasoning models to break down complex topics step-by-step in any language with complete mathematical derivations, code examples, analogies, and active recall practice.
+                  A single, verified cloud model (<span className="font-mono font-semibold">gemini-flash-latest</span>) powers chat, notes and the classroom: step-by-step explanations in any language, LaTeX formulas, a bold final answer for every problem, and a verified Wolfram Alpha block for calculations.
                 </p>
               </div>
             )}

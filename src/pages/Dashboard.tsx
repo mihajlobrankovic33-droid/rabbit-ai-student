@@ -3,7 +3,6 @@ import { ChatView } from "@/components/study/ChatView";
 import { ClassroomView } from "@/components/study/ClassroomView";
 import { GenerateForm } from "@/components/study/GenerateForm";
 import { GeneratedContent } from "@/components/study/GeneratedContent";
-import { MarketView } from "@/components/study/MarketView";
 import { RabbitLogo } from "@/components/study/RabbitLogo";
 import { SettingsModal } from "@/components/study/SettingsModal";
 import { HamburgerMenu } from "@/components/study/HamburgerMenu";
@@ -23,16 +22,12 @@ import {
 import { getSelectedAIProvider } from "@/services/study/aiService";
 import type { ChatMessage, ChatSession, Note, StudyContent } from "@/types/study";
 import {
-  BookOpen,
   Cpu,
   GraduationCap,
   Loader2,
   Menu,
   MessageSquare,
-  Plus,
-  ShoppingBag,
   Sparkles,
-  Trash2,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -56,7 +51,7 @@ export default function Dashboard() {
   const { generateNotes } = useStudyAI();
   const { t } = useI18n();
 
-  const [activeView, setActiveView] = useState<"chat" | "classroom" | "notes" | "market" | "library">("chat");
+  const [activeView, setActiveView] = useState<"chat" | "classroom" | "notes">("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -158,7 +153,7 @@ export default function Dashboard() {
         provider: prov,
         model:
           prov === "gemini"
-            ? "Gemini Flash Thinking"
+            ? "Gemini Flash (AI)"
             : prov === "in_browser"
             ? "In-Browser WebGPU"
             : "Built-in Brain",
@@ -415,19 +410,6 @@ export default function Dashboard() {
                 <GraduationCap className="h-3.5 w-3.5" />
                 <span>Notes</span>
               </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveView("market")}
-                className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-extrabold transition-all ${
-                  activeView === "market"
-                    ? "bg-primary text-primary-foreground shadow-xs"
-                    : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
-                }`}
-              >
-                <ShoppingBag className="h-3.5 w-3.5" />
-                <span>Market</span>
-              </button>
             </div>
           </div>
 
@@ -506,15 +488,6 @@ export default function Dashboard() {
                       Generiši Nove Beleške
                     </h2>
                   </div>
-                  {notes.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setActiveView("library")}
-                      className="text-xs font-bold text-primary hover:underline"
-                    >
-                      Biblioteka ({notes.length})
-                    </button>
-                  )}
                 </div>
                 <GenerateForm onGenerate={handleGenerate} isLoading={isGenerating} />
               </section>
@@ -533,102 +506,6 @@ export default function Dashboard() {
                 />
               </section>
             </div>
-          </div>
-        )}
-
-        {/* View 3: Student PDF Notes Market */}
-        {activeView === "market" && (
-          <MarketView onOpenNotesStudio={() => setActiveView("notes")} />
-        )}
-
-        {/* View 4: Full Library & Revision */}
-        {activeView === "library" && (
-          <div className="rounded-3xl border border-border/80 bg-card p-4 sm:p-6 shadow-md space-y-5 animate-in fade-in duration-300">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/70 pb-4">
-              <div>
-                <h2 className="text-lg sm:text-xl font-extrabold text-foreground">{t("libraryTab")}</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Sačuvane lekcije i beleške dostupne 100% offline u tvom pretraživaču.
-                </p>
-              </div>
-              <Button
-                type="button"
-                onClick={() => setActiveView("notes")}
-                className="gap-2 rounded-xl text-xs font-bold shadow-xs shrink-0 self-start sm:self-auto"
-              >
-                <Plus className="h-4 w-4" />
-                Nova Beleška
-              </Button>
-            </div>
-
-            {notes.length === 0 ? (
-              <div className="py-12 sm:py-16 text-center">
-                <div className="mx-auto flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-3xl bg-primary/10 text-primary mb-4">
-                  <BookOpen className="h-7 w-7 sm:h-8 sm:w-8" />
-                </div>
-                <h3 className="text-base font-bold text-foreground">Tvoja biblioteka je još uvek prazna</h3>
-                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                  Generiši beleške u Studiju ili sačuvaj odgovore iz AI Chata direktno u biblioteku.
-                </p>
-              </div>
-            ) : (
-              <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {notes.map((note) => (
-                  <div
-                    key={note.id}
-                    onClick={() => handleSelectNote(note)}
-                    className="group cursor-pointer rounded-2xl border border-border/70 bg-card p-4 transition-all hover:border-primary/50 hover:shadow-md"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="rounded-lg bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                        {Array.isArray(note.content?.keyPoints) ? note.content.keyPoints.length : 0} Tačaka
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handlePlayResponse(note.content, note.title);
-                          }}
-                          className={`cursor-pointer rounded-lg p-1 transition-all ${
-                            isAudioPlaying && audioTitle === note.title
-                              ? "bg-primary/20 text-primary animate-pulse"
-                              : "text-muted-foreground hover:bg-primary/15 hover:text-primary"
-                          }`}
-                          title="Slušaj lekciju uz ElevenLabs"
-                        >
-                          {isAudioPlaying && audioTitle === note.title ? (
-                            <VolumeX className="h-3.5 w-3.5 text-primary" />
-                          ) : (
-                            <Volume2 className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                        <span className="text-[10px] text-muted-foreground">
-                          {new Date(note.createdAt).toLocaleDateString()}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteNote(note.id);
-                          }}
-                          className="cursor-pointer rounded-lg p-1 text-muted-foreground transition-all hover:bg-destructive/15 hover:text-destructive"
-                          title="Obriši ovu belešku"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                    <h4 className="font-bold text-sm text-foreground line-clamp-1 group-hover:text-primary">
-                      {note.title}
-                    </h4>
-                    <p className="text-xs text-muted-foreground line-clamp-2 mt-1 leading-relaxed">
-                      {note.content?.summary || ""}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </main>
@@ -677,32 +554,6 @@ export default function Dashboard() {
 
           <button
             type="button"
-            onClick={() => setActiveView("market")}
-            className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
-              activeView === "market"
-                ? "text-primary font-bold"
-                : "text-muted-foreground hover:text-foreground font-medium"
-            }`}
-          >
-            <ShoppingBag className={`h-5 w-5 ${activeView === "market" ? "scale-110" : ""}`} />
-            <span className="text-[10px] mt-1">Market</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveView("library")}
-            className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
-              activeView === "library"
-                ? "text-primary font-bold"
-                : "text-muted-foreground hover:text-foreground font-medium"
-            }`}
-          >
-            <BookOpen className={`h-5 w-5 ${activeView === "library" ? "scale-110" : ""}`} />
-            <span className="text-[10px] mt-1">Biblioteka</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setHamburgerOpen(true)}
             className="flex flex-col items-center justify-center flex-1 py-1 text-center text-muted-foreground hover:text-foreground transition-colors min-h-[44px] relative"
           >
@@ -735,8 +586,6 @@ export default function Dashboard() {
         onDeleteNote={handleDeleteNote}
         onOpenNotesTab={() => setActiveView("notes")}
         onOpenClassroomTab={() => setActiveView("classroom")}
-        onOpenMarketTab={() => setActiveView("market")}
-        onOpenLibraryTab={() => setActiveView("library")}
         timerSeconds={timerSeconds}
         timerActive={timerActive}
         timerMode={timerMode}

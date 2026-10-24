@@ -146,7 +146,15 @@ export function convertBufferToBlobUrl(
   buffer: ArrayBuffer | Uint8Array,
   mimeType: string = "audio/mpeg"
 ): string {
-  const blob = new Blob([buffer], { type: mimeType });
+  // Buffer can be a Uint8Array backed by SharedArrayBuffer in some runtimes,
+  // which Blob rejects — normalize it to a plain ArrayBuffer slice first.
+  const blobPart: BlobPart = buffer instanceof Uint8Array
+    ? (buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength
+      ) as ArrayBuffer)
+    : buffer;
+  const blob = new Blob([blobPart], { type: mimeType });
   return URL.createObjectURL(blob);
 }
 

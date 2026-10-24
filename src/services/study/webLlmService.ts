@@ -16,6 +16,8 @@ export interface InBrowserModelOption {
   size: string;
   description: string;
   recommended?: boolean;
+  /** Some quantizations need the experimental shader-f16 WebGPU feature */
+  requiresShaderF16?: boolean;
 }
 
 export interface WebGPUCapability {
@@ -66,8 +68,19 @@ let isInitializing = false;
 
 const BROWSER_MODEL_KEY = "study_buddy_in_browser_model";
 
+// Minimal WebGPU typings (no @webgpu/types dependency required)
+interface GpuAdapterLike {
+  features: { has: (feature: string) => boolean };
+}
+type GpuCapableNavigator = Navigator & {
+  gpu?: { requestAdapter: () => Promise<GpuAdapterLike | null> };
+};
+
 export async function checkWebGPUCapability(): Promise<WebGPUCapability> {
-  if (typeof navigator === "undefined" || !navigator.gpu) {
+  const gpuNavigator = (typeof navigator !== "undefined" ? navigator : undefined) as
+    | GpuCapableNavigator
+    | undefined;
+  if (!gpuNavigator?.gpu) {
     return {
       supported: false,
       hasShaderF16: false,
@@ -76,7 +89,7 @@ export async function checkWebGPUCapability(): Promise<WebGPUCapability> {
   }
 
   try {
-    const adapter = await navigator.gpu.requestAdapter();
+    const adapter = await gpuNavigator.gpu.requestAdapter();
     if (!adapter) {
       return {
         supported: false,

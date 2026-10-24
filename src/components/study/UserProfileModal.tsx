@@ -21,7 +21,6 @@ import {
   Upload,
   User as UserIcon,
 } from "lucide-react";
-import { syncAuthorProfileAcrossMarketNotes } from "@/services/study/marketService";
 import { toast } from "sonner";
 
 interface UserProfileModalProps {
@@ -148,10 +147,7 @@ export function UserProfileModal({
         avatar: avatar || "",
       });
 
-      // 2. Synchronize all published market notes for this user to the new author name & avatar!
-      if (user?.id) {
-        await syncAuthorProfileAcrossMarketNotes(user.id, cleanName, avatar || "");
-      }
+      // 2. Profile saved locally for this student
 
       toast.success("Profil uspešno sačuvan!", {
         description: `Tvoje ime "${cleanName}" je automatski ažurirano na svim tvojim skriptama i PDF dokumentima.`,
