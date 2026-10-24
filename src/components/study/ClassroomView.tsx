@@ -100,8 +100,21 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
   const [convoMessages, setConvoMessages] = useState<Array<{ id: string; role: "teacher" | "student"; content: string; reaction?: string }>>([]);
   const [convoInput, setConvoInput] = useState("");
   const [isConvoThinking, setIsConvoThinking] = useState(false);
+  // Question the teacher is waiting for the student to answer (shown as a card)
+  const [convoQuestion, setConvoQuestion] = useState("");
+  // Live subtitle of what the teacher is currently SAYING (voice-first, no chat bubbles)
+  const [convoCaption, setConvoCaption] = useState("");
+  // Hands-free: mic stays open and auto-interrupts the teacher when you speak
+  const [autoListen, setAutoListen] = useState(true);
   const convoEndRef = useRef<HTMLDivElement>(null);
   const convoAbortRef = useRef<AbortController | null>(null);
+  const convoInputRef = useRef<HTMLTextAreaElement>(null);
+  // Route speech-recognizer results: in conversation mode they become a message
+  const convoListenHandlerRef = useRef<((transcript: string) => void) | null>(null);
+  const autoListenRef = useRef(true);
+  useEffect(() => {
+    autoListenRef.current = autoListen;
+  }, [autoListen]);
 
   // Load history on mount
   useEffect(() => {
@@ -128,6 +141,12 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
     speechRecognizerRef.current = createSpeechRecognizer(
       lang,
       (transcript) => {
+        // In conversation mode: the student's voice becomes the next turn, and
+        // it INTERRUPTS the teacher immediately (barge-in, like a real dialogue).
+        if (convoListenHandlerRef.current) {
+          convoListenHandlerRef.current(transcript);
+          return;
+        }
         setStudentAnswer((prev) => (prev ? `${prev} ${transcript}` : transcript));
         setIsListening(false);
         toast.info("Odgovor snimljen glasom! 🎙️");
@@ -149,6 +168,18 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
   const toggleSpeechRecognition = () => {
     if (!speechRecognizerRef.current?.isSupported) {
       toast.error("Tvoj pregledač ne podržava direktno prepoznavanje glasa. Možeš normalno kucati odgovor!");
+      return;
+    }
+
+    // In conversation mode the mic interrupts the teacher (barge-in).
+    if (isConversing) {
+      if (isListening) {
+        stopConvoListening();
+      } else {
+        stopSpeaking();
+        setIsSpeaking(false);
+        startConvoListening();
+      }
       return;
     }
 
@@ -180,6 +211,44 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
       .replace(/\s+/g, " ")
       .trim();
 
+  // Voice-first turn: the teacher SAYS the reply (+ pending question) out loud.
+  // No chat bubble is written — only a live subtitle while it speaks.
+  const speakTeacherTurn = (reply: string, question?: string) => {
+    const spoken = cleanTtsText(question ? `${reply} ${question}` : reply);
+    setConvoCaption(spoken);
+    // The mic opens when the teacher is done, so it never hears the speaker
+    // (that would cause feedback). To interrupt early, press "Govori".
+    const onDone = () => {
+      setIsSpeaking(false);
+      if (autoListenRef.current) startConvoListening();
+    };
+    if (!voiceEnabled || !spoken) {
+      onDone();
+      return;
+    }
+    setIsSpeaking(true);
+    speakTeacherText(spoken, activeTeacher, lang, onDone);
+  };
+
+  // Open the mic in conversation mode and route what it hears to the chat.
+  const startConvoListening = () => {
+    if (!speechRecognizerRef.current?.isSupported) return;
+    convoListenHandlerRef.current = (transcript: string) => {
+      stopSpeaking();
+      setIsSpeaking(false);
+      stopConvoListening();
+      void sendConvoMessage(transcript, "free");
+    };
+    setIsListening(true);
+    speechRecognizerRef.current.start();
+  };
+
+  const stopConvoListening = () => {
+    convoListenHandlerRef.current = null;
+    speechRecognizerRef.current?.stop();
+    setIsListening(false);
+  };
+
   const startConversation = async (subject: string, topicText: string) => {
     stopSpeaking();
     setIsConversing(true);
@@ -200,14 +269,17 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
         signal: controller.signal,
       });
 
+      // History only (for the AI context) — the teacher does NOT write messages,
+      // it speaks. The question is said out loud and shown on the answer card.
       const teacherMsg = {
         id: `convo-${Date.now()}`,
         role: "teacher" as const,
-        content: data.reply,
+        content: data.question ? `${data.reply} ❓ ${data.question}` : data.reply,
         reaction: data.reaction,
       };
       setConvoMessages([teacherMsg]);
-      playVoice(cleanTtsText(data.reply));
+      setConvoQuestion(data.question || "");
+      speakTeacherTurn(data.reply, data.question);
     } catch (e) {
       if (!controller.signal.aborted) {
         console.error("Conversation start error:", e);
@@ -228,6 +300,8 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
     if (isConvoThinking) return;
 
     stopSpeaking();
+    setIsSpeaking(false);
+    stopConvoListening();
 
     const studentMsg = {
       id: `convo-student-${Date.now()}`,
@@ -235,13 +309,24 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
       content: cleanText || `(${intent})`,
     };
 
-    const historyForApi: Array<{ role: "teacher" | "student"; content: string }> = [
-      ...convoMessages.map((m) => ({ role: m.role, content: m.content })),
-      { role: "student", content: cleanText || studentMsg.content },
-    ];
+    // Include the teacher's pending question so the model knows exactly what
+    // the student is answering (that's what makes this feel like a dialogue).
+    const historyForApi: Array<{ role: "teacher" | "student"; content: string }> =
+      convoMessages.map((m, idx) => ({
+        role: m.role,
+        content:
+          m.role === "teacher" &&
+          convoQuestion &&
+          idx === convoMessages.length - 1
+            ? `${m.content}\n\n❓ PITANJE ZA UČENIKA: ${convoQuestion}`
+            : m.content,
+      }));
+    historyForApi.push({ role: "student", content: cleanText || studentMsg.content });
 
     setConvoMessages((prev) => [...prev, studentMsg]);
     setConvoInput("");
+    setConvoQuestion("");
+    setConvoCaption("");
     setIsConvoThinking(true);
 
     const controller = new AbortController();
@@ -261,11 +346,12 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
       const teacherMsg = {
         id: `convo-${Date.now()}`,
         role: "teacher" as const,
-        content: data.reply,
+        content: data.question ? `${data.reply} ❓ ${data.question}` : data.reply,
         reaction: data.reaction,
       };
       setConvoMessages((prev) => [...prev, teacherMsg]);
-      playVoice(cleanTtsText(data.reply));
+      setConvoQuestion(data.question || "");
+      speakTeacherTurn(data.reply, data.question);
     } catch (e) {
       if (!controller.signal.aborted) {
         console.error("Conversation error:", e);
@@ -278,10 +364,13 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
 
   const endConversation = () => {
     stopSpeaking();
+    stopConvoListening();
     convoAbortRef.current?.abort();
     setIsConversing(false);
     setConvoMessages([]);
     setConvoInput("");
+    setConvoQuestion("");
+    setConvoCaption("");
     setIsConvoThinking(false);
   };
 
@@ -627,6 +716,27 @@ ${activeSession.turns
               {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </button>
 
+            <button
+              type="button"
+              onClick={() => {
+                const next = !autoListen;
+                setAutoListen(next);
+                if (!next) stopConvoListening();
+              }}
+              className={`cursor-pointer rounded-xl p-2 text-xs transition-all ${
+                autoListen
+                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+              title={
+                autoListen
+                  ? "Slušanje uključeno — mikrofon te čuje kad nastavnik završi"
+                  : "Uključi automatsko slušanje (hands-free)"
+              }
+            >
+              {autoListen ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+            </button>
+
             <Button
               variant="outline"
               size="sm"
@@ -639,46 +749,82 @@ ${activeSession.turns
           </div>
         </div>
 
-        {/* Conversation Transcript */}
-        <div className="rounded-3xl border border-border/80 bg-card shadow-sm p-4 sm:p-5">
-          <div className="space-y-4 max-h-[52vh] overflow-y-auto pr-1">
-            {convoMessages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex items-start gap-3 ${msg.role === "student" ? "flex-row-reverse" : ""}`}
+        {/* Voice-first stage: the teacher SPEAKS, we only show a live subtitle */}
+        <div className="rounded-3xl border border-border/80 bg-card shadow-sm p-5 sm:p-7">
+          <div className="flex flex-col items-center text-center gap-4">
+            {/* Teacher avatar — pulses while speaking / thinking */}
+            <div className="relative">
+              <span
+                className={`flex h-24 w-24 items-center justify-center rounded-full bg-primary/15 text-5xl select-none transition-transform ${
+                  isSpeaking ? "animate-pulse" : ""
+                }`}
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-lg">
-                  {msg.role === "teacher" ? activeTeacher.emoji : "🧑‍🎓"}
-                </span>
-                <div
-                  className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed max-w-[80%] ${
-                    msg.role === "teacher"
-                      ? "bg-primary/5 border border-primary/15 text-foreground"
-                      : "bg-muted/60 border border-border/70 text-foreground"
-                  }`}
-                >
-                  <span className="block text-[10px] font-extrabold text-primary uppercase tracking-wider mb-0.5">
-                    {msg.role === "teacher" ? activeTeacher.title : "Ti"}
-                  </span>
-                  <p className="whitespace-pre-line">{msg.content}</p>
-                </div>
-              </div>
-            ))}
+                {activeTeacher.emoji}
+              </span>
+              {isSpeaking && (
+                <>
+                  <span className="absolute inset-0 rounded-full border-2 border-primary/50 animate-ping" />
+                  <span
+                    className="absolute -inset-2 rounded-full border border-primary/30 animate-ping"
+                    style={{ animationDuration: "1.6s" }}
+                  />
+                </>
+              )}
+            </div>
 
-            {isConvoThinking && (
-              <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-lg">
-                  {activeTeacher.emoji}
-                </span>
-                <div className="rounded-2xl bg-primary/5 border border-primary/15 px-4 py-3 text-sm text-muted-foreground flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "120ms" }} />
-                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "240ms" }} />
-                  <span className="ml-1">{activeTeacher.title} razmišlja...</span>
-                </div>
+            <span
+              className={`text-[11px] font-extrabold uppercase tracking-wider flex items-center gap-1.5 ${
+                isListening ? "text-emerald-600 dark:text-emerald-400" : "text-primary"
+              }`}
+            >
+              {isListening && (
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              )}
+              {isListening
+                ? "Slušam te... 🎙️"
+                : isSpeaking
+                  ? `${activeTeacher.title} priča...`
+                  : isConvoThinking
+                    ? "Razmišlja..."
+                    : convoQuestion
+                      ? "Čeka tvoj odgovor — govori 🎙️"
+                      : `${activeTeacher.title} te sluša`}
+            </span>
+
+            {/* Live subtitle of the current spoken line */}
+            <p
+              className={`max-w-2xl text-base sm:text-lg font-medium leading-relaxed transition-opacity duration-300 ${
+                convoCaption ? "opacity-100 text-foreground" : "opacity-40 text-muted-foreground italic"
+              }`}
+            >
+              {convoCaption || "Izgovori odgovor ili postavi pitanje — nastavnik odgovara glasom."}
+            </p>
+
+            {/* Audio waveform while speaking */}
+            {isSpeaking && (
+              <div className="flex items-end gap-1 h-6" aria-hidden>
+                {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                  <span
+                    key={i}
+                    className="w-1.5 rounded-full bg-primary animate-pulse"
+                    style={{
+                      height: `${[35, 70, 100, 55, 90, 45, 75][i]}%`,
+                      animationDelay: `${i * 110}ms`,
+                      animationDuration: "700ms",
+                    }}
+                  />
+                ))}
               </div>
             )}
-            <div ref={convoEndRef} />
+
+            {/* Student's last spoken line (transcription, so you know what was heard) */}
+            {convoMessages.length > 0 &&
+              [...convoMessages].reverse().find((m) => m.role === "student") && (
+                <p className="text-xs text-muted-foreground italic max-w-xl">
+                  🎤 Čuo sam te: “
+                  {[...convoMessages].reverse().find((m) => m.role === "student")?.content}”
+                </p>
+              )}
           </div>
         </div>
 
@@ -699,6 +845,37 @@ ${activeSession.turns
           </div>
         </div>
 
+        {/* Teacher's pending question — the student should answer this */}
+        {convoQuestion && (
+          <div className="rounded-3xl border-2 border-dashed border-primary/50 bg-primary/5 p-4 sm:p-5 shadow-sm space-y-2.5">
+            <span className="text-[11px] font-extrabold text-primary uppercase tracking-wider flex items-center gap-1.5">
+              ❓ {activeTeacher.title} te pita:
+            </span>
+            <p className="text-sm sm:text-base font-semibold text-foreground leading-relaxed">
+              {convoQuestion}
+            </p>
+            <div className="flex flex-wrap gap-2 pt-0.5">
+              <Button
+                size="sm"
+                onClick={() => convoInputRef.current?.focus()}
+                disabled={isConvoThinking}
+                className="cursor-pointer font-bold rounded-xl text-xs gap-1.5"
+              >
+                ✍️ Odgovori
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => sendConvoMessage("Nije mi jasno, objasni mi ponovo", "dont_understand")}
+                disabled={isConvoThinking}
+                className="cursor-pointer font-bold rounded-xl text-xs"
+              >
+                🤔 Nije mi jasno
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Free-text input */}
         <div className="rounded-3xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm space-y-2">
           <div className="flex items-center gap-2">
@@ -717,6 +894,7 @@ ${activeSession.turns
             </button>
 
             <textarea
+              ref={convoInputRef}
               rows={1}
               value={convoInput}
               onChange={(e) => setConvoInput(e.target.value)}

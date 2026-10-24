@@ -4,6 +4,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+import { EdgeTTS } from "node-edge-tts";
 
 // Load .env for the Node process (tsx/dev + prod) so GEMINI_API_KEY / WOLFRAM_APPID work
 function loadEnvFile(): void {
@@ -416,6 +417,204 @@ async function startServer() {
       res.status(500).json({
         valid: false,
         error: err instanceof Error ? err.message : "GreĹˇka pri proveri kljuÄŤa",
+      });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // FREE neural text-to-speech (Microsoft Edge online TTS, no API key).
+  // Natural-sounding voices including Serbian (sr-RS), Croatian, Bosnian.
+  // This is the default voice for the app — ElevenLabs needs a paid plan.
+  // ------------------------------------------------------------------
+  const EDGE_VOICE_BY_LANG: Record<string, { male: string; female: string }> = {
+    sr: { male: "sr-RS-NicholasNeural", female: "sr-RS-SophieNeural" },
+    hr: { male: "hr-HR-SreckoNeural", female: "hr-HR-GabrijelaNeural" },
+    bs: { male: "bs-BA-GoranNeural", female: "bs-BA-VesnaNeural" },
+    en: { male: "en-US-AndrewNeural", female: "en-US-EmmaNeural" },
+    de: { male: "de-DE-ConradNeural", female: "de-DE-KatjaNeural" },
+    fr: { male: "fr-FR-RemyNeural", female: "fr-FR-DeniseNeural" },
+    es: { male: "es-ES-AlvaroNeural", female: "es-ES-ElviraNeural" },
+    it: { male: "it-IT-DiegoNeural", female: "it-IT-ElsaNeural" },
+    ru: { male: "ru-RU-DmitryNeural", female: "ru-RU-SvetlanaNeural" },
+    pt: { male: "pt-BR-AntonioNeural", female: "pt-BR-FranciscaNeural" },
+    tr: { male: "tr-TR-AhmetNeural", female: "tr-TR-EmelNeural" },
+  };
+
+  const edgeAudioCache = new Map<string, Buffer>();
+  const EDGE_CACHE_MAX_ENTRIES = 200;
+
+  /** ratio (1 = normal speed) -> "+10%" / "-15%" prosody value. */
+  function edgePercentFromRatio(ratio: unknown): string | undefined {
+    if (typeof ratio !== "number" || !isFinite(ratio) || ratio <= 0) return undefined;
+    const pct = Math.round((ratio - 1) * 100);
+    if (pct === 0) return undefined;
+    return `${pct > 0 ? "+" : ""}${pct}%`;
+  }
+
+  /** "+1.15" / 1.15 / "+15%" -> "+15%" (accepts what the client sends). */
+  function edgePercentFromValue(value: unknown, isPitch = false): string | undefined {
+    if (typeof value === "number" && isFinite(value)) {
+      if (isPitch) {
+        // Client pitch is a multiplier; map it to a modest Hz offset.
+        const hz = Math.round((value - 1) * 15);
+        return hz === 0 ? undefined : `${hz > 0 ? "+" : ""}${hz}Hz`;
+      }
+      return edgePercentFromRatio(value);
+    }
+    if (typeof value === "string" && value.trim()) {
+      const raw = value.trim();
+      if (/^[+-]?\d+(\.\d+)?%$/.test(raw)) {
+        const num = parseFloat(raw);
+        return `${num > 0 ? "+" : ""}${num}%`;
+      }
+      if (isPitch && /^[+-]?\d+(\.\d+)?Hz$/i.test(raw)) return raw;
+      const num = parseFloat(raw);
+      if (!isNaN(num)) {
+        if (isPitch) {
+          const hz = Math.round((num - 1) * 15);
+          return hz === 0 ? undefined : `${hz > 0 ? "+" : ""}${hz}Hz`;
+        }
+        return edgePercentFromRatio(num);
+      }
+    }
+    return undefined;
+  }
+
+  // Edge occasionally rate-limits (429) when we ask for several sentences fast.
+  // Serialize requests + retry with backoff so the free Serbian neural voice is
+  // actually used instead of falling back to a voice that mangles Serbian.
+  let edgeQueue: Promise<void> = Promise.resolve();
+  const EDGE_MAX_ATTEMPTS = 4;
+  const edgeSleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  async function synthesizeEdge(
+    text: string,
+    voice: string,
+    locale: string,
+    rate?: string,
+    pitch?: string
+  ): Promise<Buffer> {
+    const run = async (): Promise<Buffer> => {
+      let lastErr: unknown;
+      for (let attempt = 1; attempt <= EDGE_MAX_ATTEMPTS; attempt++) {
+        try {
+          const tts = new EdgeTTS({
+            voice,
+            lang: locale,
+            rate: rate || "default",
+            pitch: pitch || "default",
+            timeout: 25000,
+          });
+          const chunks: Buffer[] = [];
+          for await (const chunk of tts.streamAudio(text)) {
+            if (Buffer.isBuffer(chunk) && chunk.length > 0) chunks.push(chunk);
+          }
+          const combined = Buffer.concat(chunks);
+          if (combined.length > 0) return combined;
+          lastErr = new Error("Edge returned empty audio");
+        } catch (e) {
+          lastErr = e;
+        }
+        if (attempt < EDGE_MAX_ATTEMPTS) {
+          await edgeSleep(350 * attempt + Math.random() * 250);
+        }
+      }
+      throw lastErr instanceof Error ? lastErr : new Error("Edge TTS failed");
+    };
+
+    // Chain onto the queue so requests go out one at a time.
+    const result = edgeQueue.then(run, run);
+    edgeQueue = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
+
+  function sendAudioWithRange(req: express.Request, res: express.Response, combined: Buffer): void {
+    const range = req.headers.range;
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10) || 0;
+      const end = parts[1] ? parseInt(parts[1], 10) : combined.length - 1;
+      const chunksize = end - start + 1;
+      res.status(206);
+      res.setHeader("Content-Range", `bytes ${start}-${end}/${combined.length}`);
+      res.setHeader("Content-Length", chunksize);
+      res.send(combined.subarray(start, end + 1));
+    } else {
+      res.setHeader("Content-Length", combined.length);
+      res.send(combined);
+    }
+  }
+
+  app.post("/api/tts/edge", async (req, res) => {
+    try {
+      const { text, lang = "sr", gender = "male", voice, rate, pitch } = req.body || {};
+      const rawText = typeof text === "string" ? text : "";
+      const cleanText = rawText
+        .replace(/\[[^\]]{1,40}\]/g, " ")
+        .replace(/[*_#`>]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (!cleanText) {
+        res.status(400).json({ error: "Tekst je neophodan za sintezu govora." });
+        return;
+      }
+
+      const langKey = String(lang).slice(0, 2).toLowerCase();
+      const pair = EDGE_VOICE_BY_LANG[langKey] || EDGE_VOICE_BY_LANG.en;
+      const chosenVoice =
+        typeof voice === "string" && /^[a-z]{2}-[A-Z]{2,4}-[\w]+Neural$/i.test(voice.trim())
+          ? voice.trim()
+          : gender === "female"
+            ? pair.female
+            : pair.male;
+      const locale = chosenVoice.match(/^([a-z]{2}-[A-Za-z0-9]{2,4})-/)?.[1] || `${langKey}-US`;
+      const rateStr = edgePercentFromValue(rate);
+      const pitchStr = edgePercentFromValue(pitch, true);
+
+      const cacheKey = `${chosenVoice}|${rateStr || ""}|${pitchStr || ""}|${cleanText}`;
+      let audio = edgeAudioCache.get(cacheKey);
+
+      if (!audio) {
+        try {
+          audio = await synthesizeEdge(cleanText, chosenVoice, locale, rateStr, pitchStr);
+        } catch (edgeErr) {
+          console.warn(
+            `Edge TTS failed (${chosenVoice}):`,
+            edgeErr instanceof Error ? edgeErr.message : edgeErr
+          );
+          res.status(502).json({
+            error: "EDGE_TTS_ERROR",
+            message: edgeErr instanceof Error ? edgeErr.message : "Sinteza govora nije uspela.",
+          });
+          return;
+        }
+
+        if (!audio || audio.length === 0) {
+          res.status(502).json({ error: "EDGE_TTS_EMPTY" });
+          return;
+        }
+
+        edgeAudioCache.set(cacheKey, audio);
+        if (edgeAudioCache.size > EDGE_CACHE_MAX_ENTRIES) {
+          const oldest = edgeAudioCache.keys().next().value;
+          if (oldest !== undefined) edgeAudioCache.delete(oldest);
+        }
+      }
+
+      sendAudioWithRange(req, res, audio);
+    } catch (err) {
+      console.error("Edge TTS error:", err);
+      res.status(500).json({
+        error: "EDGE_TTS_ERROR",
+        message: err instanceof Error ? err.message : "Greška pri obradi govora.",
       });
     }
   });
@@ -1057,13 +1256,22 @@ Return STRICT JSON matching this schema:
           story: `Retell "${topic}" as an engaging little STORY (a tale, a scenario, a "šala" / gossip-style narrative) with characters and a beginning-middle-end, so it sticks. Keep it vivid and fun but still accurate. End with the one key takeaway the story teaches.`,
           dont_understand: `The student says they DON'T understand. Do NOT repeat the same explanation. Re-explain "${topic}" from a completely different angle: a simpler word choice, a concrete real-world analogy, or a tiny step-by-step example. Go slower and gentler. Then ask a very easy check question to confirm it landed.`,
           simpler: `The student wants it EVEN SIMPLER. Break "${topic}" down to the absolute basics — plain everyday language, one tiny example, no jargon. Speak like explaining to a friend. End with a warm, easy question.`,
-          ask: `Ask the student ONE thoughtful question about "${topic}" to test understanding. Keep it short and answerable. Wait for their reply.`,
-          answer: `Evaluate the student's answer about "${topic}". Be warm and encouraging first, then gently correct or confirm. Briefly give the right answer if needed. Then ask a natural follow-up question to keep the conversation going.`,
+          ask: `Ask the student ONE thoughtful question about "${topic}" to test understanding. Keep it short, concrete and answerable in one sentence. Then WAIT for their reply — do not answer it yourself.`,
+          answer: `The student just answered your question. This is a real check of understanding:
+1. First judge it clearly: say "Tačno!" / "Bravo, tačno je!" if correct, or "Nije baš..." / "Gotovo, ali..." if wrong or partial.
+2. If wrong or incomplete, give the RIGHT answer in one short sentence and say why in the simplest way.
+3. If correct, praise briefly and add one small extra detail they probably didn't know.
+4. ALWAYS finish by asking the NEXT question about "${topic}" — a slightly harder one, so the lesson keeps moving.`,
           quiz: `Give a short pop-quiz question on "${topic}". One question at a time, then wait for the answer.`,
           example: `Give ONE concrete, worked example related to "${topic}". Walk through it step by step in a conversational way, as if showing the student on the blackboard. Then ask if they want another example or to move on.`,
           continue: `Continue the lesson naturally from where the conversation left off. Introduce the next small piece of "${topic}" in a short spoken chunk, then check in.`,
           done: `Wrap up the lesson. Warmly summarize the 2-3 main takeaways of "${topic}", praise the student's curiosity, and invite them to come back or pick a new topic.`,
-          free: `Respond naturally to what the student just said. If they asked a question, answer it simply. If it's small talk or "pomozi", respond helpfully and steer back to learning "${topic}". Keep replies SHORT and spoken (2-4 sentences), like real dialogue. Always end with a question or an invitation to keep the conversation going.`,
+          free: `Respond naturally to what the student just said.
+- If the transcript shows a "PITANJE ZA UČENIKA" (a question you asked) and their message looks like an answer to it, treat it as intent "answer": judge it (tačno / nije tačno), correct if needed, then ask the next question.
+- If they asked a question, answer it simply.
+- If they say "nije mi jasno", "ne razumem", "ponovi" — re-explain from a DIFFERENT angle, don't repeat yourself.
+- If it's small talk or "pomozi", respond helpfully and steer back to learning "${topic}".
+Keep replies SHORT and spoken (2-4 sentences), like real dialogue. Always end with a question or an invitation so the conversation continues.`,
         };
 
         const prompt = `You are ${teacherName} (${teacherSpecies}), a warm, charming animal teacher having a LIVE one-on-one conversation with your student.

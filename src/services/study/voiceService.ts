@@ -908,6 +908,52 @@ async function speakWithElevenLabs(
   return playAudioArrayBuffer(arrayBuffer, options.onEnd, options.onError);
 }
 
+// FREE neural voice via Microsoft Edge online TTS (server-side, no API key,
+// no payment needed). Natural-sounding and supports Serbian/Croatian/Bosnian.
+async function speakWithEdgeTTS(
+  text: string,
+  lang: string,
+  options: SpeakOptions
+): Promise<boolean> {
+  const cleanSpoken = stripEmotionTags(text);
+  if (!cleanSpoken) {
+    options.onEnd?.();
+    return true;
+  }
+
+  const cacheKey = `edge:${lang}:${options.rate ?? ""}:${options.pitch ?? ""}:${cleanSpoken}`;
+  let arrayBuffer = audioArrayBufferCache.get(cacheKey);
+
+  if (!arrayBuffer) {
+    try {
+      const res = await fetch("/api/tts/edge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: cleanSpoken,
+          lang,
+          rate: options.rate,
+          pitch: options.pitch,
+        }),
+      });
+
+      if (!res.ok) {
+        return false;
+      }
+
+      arrayBuffer = await res.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        return false;
+      }
+      audioArrayBufferCache.set(cacheKey, arrayBuffer);
+    } catch {
+      return false;
+    }
+  }
+
+  return playAudioArrayBuffer(arrayBuffer, options.onEnd, options.onError);
+}
+
 // High-clarity Natural Server Speech (universal, zero-config, clear Serbian pronunciation)
 async function speakWithNaturalTTS(
   text: string,
@@ -1055,10 +1101,14 @@ export function speakText(text: string, options: SpeakOptions = {}): () => void 
   let cancelled = false;
 
   const attemptSpeech = async () => {
-    // 1. If provider is "elevenlabs", or "auto" with a verified valid secret key, attempt ElevenLabs AI TTS
+    // 1. ElevenLabs ONLY when the user explicitly picked it, or pasted their own
+    //    key. The bundled free-plan key can't synthesize (402 payment_required),
+    //    so we don't waste a request on it during normal "auto" playback.
+    const hasUserKey = Boolean(
+      getVoiceSettings().elevenApiKey?.trim().startsWith("sk_")
+    );
     const canAttemptEleven =
-      provider === "elevenlabs" ||
-      (provider === "auto" && isElevenLabsKeyValid());
+      provider === "elevenlabs" || (provider === "auto" && hasUserKey);
 
     if (canAttemptEleven) {
       try {
@@ -1074,13 +1124,34 @@ export function speakText(text: string, options: SpeakOptions = {}): () => void 
           return;
         }
       } catch {
-        // Fallback to natural server voice below
+        // Fallback to the free Edge voice below
       }
     }
 
     if (cancelled) return;
 
-    // 2. High-clarity Natural Server Speech (works universally across all devices, browsers, and iframes)
+    // 2. FREE neural Edge voice — the app's default (works without any API key).
+    if (provider !== "browser") {
+      try {
+        const edgeSuccess = await speakWithEdgeTTS(processedText, lang, {
+          ...options,
+          onEnd: () => {
+            if (!cancelled) options.onEnd?.();
+          },
+          onError: () => {},
+        });
+
+        if (edgeSuccess || cancelled) {
+          return;
+        }
+      } catch {
+        // Fallback to natural / browser below
+      }
+    }
+
+    if (cancelled) return;
+
+    // 3. High-clarity Natural Server Speech (works universally across all devices, browsers, and iframes)
     if (provider === "natural" || provider === "auto" || provider === "elevenlabs") {
       try {
         const naturalSuccess = await speakWithNaturalTTS(processedText, lang, {
