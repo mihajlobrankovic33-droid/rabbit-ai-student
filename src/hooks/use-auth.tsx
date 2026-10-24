@@ -73,10 +73,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authedUser));
         }
       } else if (provider === "google") {
+        // Real Google Sign-In (Google Identity Services) profile, decoded in
+        // googleAuthService. Falls back to a generic guest-like profile if the
+        // credential could not be decoded.
         const authedUser: User = {
-          id: `google-${Date.now()}`,
-          name: "Google Student",
-          email: "student@gmail.com",
+          id: String(params.id || `google-${Date.now()}`),
+          name: String(params.name || "Google Student"),
+          ...(params.email ? { email: String(params.email) } : {}),
+          ...(params.avatar ? { avatar: String(params.avatar) } : {}),
           isAnonymous: false,
         };
         setUser(authedUser);

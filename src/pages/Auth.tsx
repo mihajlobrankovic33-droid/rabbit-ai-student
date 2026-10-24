@@ -29,8 +29,13 @@ import {
   User,
   UserX,
 } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
+import {
+  initializeGoogleSignIn,
+  isGoogleSignInConfigured,
+  renderGoogleButton,
+} from "@/services/study/googleAuthService";
 
 interface AuthProps {
   redirectAfterAuth?: string;
@@ -119,21 +124,44 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
   };
 
-  const handleGoogleLogin = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const absoluteRedirect = new URL(
-        redirect.startsWith("/") ? redirect : "/",
-        window.location.origin,
-      ).toString();
-      await signIn("google", { redirectTo: absoluteRedirect });
-    } catch (err) {
-      console.error("Google sign-in error:", err);
-      setError(friendlyAuthError(err));
-      setIsLoading(false);
-    }
-  };
+  // ---- Google Sign-In (Google Identity Services) -----------------------
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+  const signInRef = useRef(signIn);
+  signInRef.current = signIn;
+  const googleConfigured = isGoogleSignInConfigured();
+
+  useEffect(() => {
+    if (!googleConfigured) return;
+    if (step !== "login" && step !== "signup") return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await initializeGoogleSignIn(async (profile) => {
+          try {
+            await signInRef.current("google", { ...profile });
+          } catch (err) {
+            console.error("Google sign-in error:", err);
+            setError(friendlyAuthError(err));
+          } finally {
+            setIsLoading(false);
+          }
+        });
+
+        if (!cancelled && googleButtonRef.current) {
+          renderGoogleButton(googleButtonRef.current);
+        }
+      } catch (err) {
+        console.warn("Google Sign-In init failed:", err);
+        if (!cancelled) setError(friendlyAuthError(err));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [googleConfigured, step]);
 
   const handlePasswordSubmit = async (
     event: React.FormEvent<HTMLFormElement>,
@@ -375,16 +403,28 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
               <form onSubmit={handlePasswordSubmit}>
                 <CardContent className="space-y-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void handleGoogleLogin()}
-                    disabled={isLoading}
-                    className="h-11 w-full gap-2.5 rounded-xl border-border/80 bg-card font-semibold text-foreground transition-all hover:border-primary/40 hover:bg-muted/40"
-                  >
-                    <GoogleIcon className="h-4 w-4" />
-                    Continue with Google
-                  </Button>
+                  {googleConfigured ? (
+                    <div className="space-y-1.5">
+                      {/* Official Google Sign-In button (rendered by Google Identity Services) */}
+                      <div
+                        ref={googleButtonRef}
+                        className="flex min-h-[44px] w-full items-center justify-center"
+                      />
+                      <p className="text-center text-[10px] text-muted-foreground">
+                        Nastavi sigurno preko svog Google naloga
+                      </p>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled
+                      className="h-11 w-full gap-2.5 rounded-xl border-border/80 bg-card font-semibold text-foreground"
+                    >
+                      <GoogleIcon className="h-4 w-4" />
+                      Continue with Google
+                    </Button>
+                  )}
 
                   <div className="relative py-0.5">
                     <div className="absolute inset-0 flex items-center">

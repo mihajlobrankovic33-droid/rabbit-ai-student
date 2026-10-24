@@ -87,6 +87,83 @@ async function startServer() {
     });
   });
 
+  // ------------------------------------------------------------------
+  // Gemini call helper with automatic retry on transient failures
+  // (503 UNAVAILABLE / high demand, 429 rate limit, 500, timeouts).
+  // ------------------------------------------------------------------
+  const GEMINI_MAX_ATTEMPTS = 3;
+  const GEMINI_RETRY_DELAY_MS = 1200;
+
+  function isTransientGeminiError(err: unknown): boolean {
+    const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+    return (
+      msg.includes("unavailable") ||
+      msg.includes("503") ||
+      msg.includes("high demand") ||
+      msg.includes("overloaded") ||
+      msg.includes("rate limit") ||
+      msg.includes("429") ||
+      msg.includes("quota") ||
+      msg.includes("internal error") ||
+      msg.includes("500") ||
+      msg.includes("deadline") ||
+      msg.includes("timeout") ||
+      msg.includes("econnreset") ||
+      msg.includes("fetch failed")
+    );
+  }
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  interface GeminiRequest {
+    model?: string;
+    contents: unknown;
+    systemInstruction?: string;
+    /** Ask Gemini to answer with raw JSON (used by the classroom endpoints). */
+    responseMimeType?: string;
+  }
+
+  /** Calls Gemini, retrying transient errors with a short backoff. */
+  async function generateWithRetry(req: GeminiRequest): Promise<string> {
+    const modelName = (req.model || GEMINI_MODEL).trim();
+    let lastErr: unknown = null;
+
+    for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt++) {
+      try {
+        const client = getGeminiClient();
+        const config: Record<string, unknown> = {};
+        if (req.systemInstruction) config.systemInstruction = req.systemInstruction;
+        if (req.responseMimeType) config.responseMimeType = req.responseMimeType;
+
+        const response = await client.models.generateContent({
+          model: modelName,
+          contents: req.contents as never,
+          config: config as never,
+        });
+        const text = (response.text || "").trim();
+        if (text) return text;
+        lastErr = new Error("Model je vratio prazan odgovor.");
+      } catch (err: unknown) {
+        lastErr = err;
+        const transient = isTransientGeminiError(err);
+        console.warn(
+          `Gemini attempt ${attempt}/${GEMINI_MAX_ATTEMPTS} (${modelName}) failed${transient ? " (transient)" : ""}:`,
+          err instanceof Error ? err.message : err
+        );
+        if (!transient) break;
+        if (attempt < GEMINI_MAX_ATTEMPTS) {
+          await sleep(GEMINI_RETRY_DELAY_MS * attempt);
+        }
+      }
+    }
+
+    throw lastErr instanceof Error
+      ? lastErr
+      : new Error("Gemini model nije vratio odgovor.");
+  }
+
   // Curated ElevenLabs voices
   const CURATED_ELEVENLABS_VOICES = [
     {
@@ -506,14 +583,66 @@ async function startServer() {
     answer?: string;
   }
 
+  // Serbian/Croatian/Bosnian -> English math vocabulary so Wolfram understands.
+  // Order matters: multi-word phrases first.
+  const WOLFRAM_TRANSLATIONS: Array<[RegExp, string]> = [
+    // question words
+    [/koliko\s+je/gi, "what is"],
+    [/koliko/gi, "how much"],
+    [/\bod\b/gi, "of"],
+    [/\bza\b/gi, "for"],
+    [/\bkada\b|\bkad\b/gi, "when"],
+    [/te[zž]i\b|tezi\b/gi, "tends"],
+    // commands
+    [/izra[cč]unaj\w*|izra[cč]unati|ra[cč]unaj\w*|racunaj\w*/gi, "calculate"],
+    [/re[sš]i\b|rje[sš]enje|re[sš]enje/gi, "solve"],
+    [/jedna[cč]in\w*|jednacin\w*/gi, "equation"],
+    [/grani[cč]n\w*\s+vrednost|grani[cč]na|limes/gi, "limit"],
+    [/kvadratni\s+koren|koren\s+iz|koren\b/gi, "sqrt"],
+    [/izvod\w*|izvedi/gi, "derivative of"],
+    [/logarit\w*/gi, "log"],
+    [/matric\w*/gi, "matrix"],
+    [/determinant\w*/gi, "determinant"],
+    [/verovatno[cć]\w*|vjerovatno[cć]\w*/gi, "probability"],
+    [/procenat\w*|procent\w*/gi, "percent"],
+    [/zbir\b|saberi|sabiranje/gi, "sum"],
+    [/deljenje|podeli|koli[cč]nik/gi, "divided by"],
+    [/na\s+primer|npr\.?/gi, "for example"],
+    // words that only add noise for Wolfram -> remove entirely
+    [/funkcij\w*/gi, ""],
+    [/\bli\b|\bse\b|\bda\b|\bje\b|\bce\b|\bceo\b|\bcelu\b|\bcela\b|molim|odnosno|znaci|zbog|tokom|pomocu|koriscenjem|upravo|onda|bas\b/gi, ""],
+  ];
+
+  /**
+   * Turns a student's natural-language math question (in any language) into a
+   * short English query Wolfram Alpha can actually compute.
+   */
+  function translateQueryForWolfram(query: string): string {
+    let translated = query;
+
+    for (const [pattern, replacement] of WOLFRAM_TRANSLATIONS) {
+      translated = translated.replace(pattern, replacement);
+    }
+
+    // Any word still carrying Serbian diacritics was not translated -> drop it,
+    // but keep pure-ASCII math tokens (x^2, 350, sin(x)/x, 20%, ...)
+    // eslint-disable-next-line no-control-regex -- intentional ASCII-range filter
+    translated = translated.replace(/[^\x00-\x7F]+/g, " ");
+
+    return translated.replace(/\s+/g, " ").trim() || query;
+  }
+
   async function queryWolfram(query: string): Promise<WolframResult | null> {
     const appid = getWolframAppId();
     if (!appid) return null;
 
+    // Wolfram Alpha is English-first: translate the student's question
+    const wolframInput = translateQueryForWolfram(query);
+
     try {
       const url =
         "https://api.wolframalpha.com/v2/query?output=JSON&format=plaintext" +
-        `&appid=${encodeURIComponent(appid)}&input=${encodeURIComponent(query)}`;
+        `&appid=${encodeURIComponent(appid)}&input=${encodeURIComponent(wolframInput)}`;
 
       const res = await fetch(url, { signal: AbortSignal.timeout(9000) });
       if (!res.ok) {
@@ -697,27 +826,16 @@ async function startServer() {
         : Promise.resolve(null);
 
       let responseText = "";
-      const modelCandidates = [GEMINI_MODEL];
+      let chatError: unknown = null;
 
-      let lastError: unknown = null;
-      for (const modelName of modelCandidates) {
-        try {
-          const client = getGeminiClient();
-          const response = await client.models.generateContent({
-            model: modelName,
-            contents: turns,
-            config: {
-              systemInstruction,
-            },
-          });
-          if (response.text && response.text.trim()) {
-            responseText = response.text;
-            break;
-          }
-        } catch (modelErr) {
-          lastError = modelErr;
-          console.warn(`Model ${modelName} generation failed:`, modelErr);
-        }
+      try {
+        responseText = await generateWithRetry({
+          contents: turns,
+          systemInstruction,
+        });
+      } catch (modelErr: unknown) {
+        chatError = modelErr;
+        console.warn("Gemini chat generation failed after retries:", modelErr);
       }
 
       const wolframAnswer = await wolframPromise;
@@ -729,7 +847,7 @@ async function startServer() {
           res.json({ reply: wolframBlock, source: "wolfram" });
           return;
         }
-        throw lastError || new Error("AI model nije vratio odgovor. Proveri GEMINI_API_KEY u .env fajlu.");
+        throw chatError || new Error("AI model nije vratio odgovor. Proveri GEMINI_API_KEY u .env fajlu.");
       }
 
       // Attach the verified Wolfram computation / answer to the AI explanation
@@ -760,8 +878,6 @@ async function startServer() {
         language = "sr",
       } = req.body;
 
-      const client = getGeminiClient();
-
       const teacherName = animalTeacher?.title || "Profesor Feliks đź¦Š";
       const teacherSpecies = animalTeacher?.species || "Pametni Lisac";
       const rewardItem = animalTeacher?.rewardItem || "Zlatna Ĺ argarepica đźĄ•";
@@ -789,21 +905,13 @@ Return STRICT JSON matching this schema:
 }`;
 
         let raw = "";
-        const modelCandidates = [GEMINI_MODEL];
-        for (const m of modelCandidates) {
-          try {
-            const resp = await client.models.generateContent({
-              model: m,
-              contents: prompt,
-              config: { responseMimeType: "application/json" },
-            });
-            if (resp.text && resp.text.trim()) {
-              raw = resp.text;
-              break;
-            }
-          } catch (e) {
-            console.warn(`Classroom start with ${m} failed:`, e);
-          }
+        try {
+          raw = await generateWithRetry({
+            contents: prompt,
+            responseMimeType: "application/json",
+          });
+        } catch (e) {
+          console.warn("Classroom start generation failed:", e);
         }
 
         try {
@@ -858,21 +966,13 @@ Return STRICT JSON matching this schema:
 }`;
 
         let raw = "";
-        const modelCandidates = [GEMINI_MODEL];
-        for (const m of modelCandidates) {
-          try {
-            const resp = await client.models.generateContent({
-              model: m,
-              contents: prompt,
-              config: { responseMimeType: "application/json" },
-            });
-            if (resp.text && resp.text.trim()) {
-              raw = resp.text;
-              break;
-            }
-          } catch (e) {
-            console.warn(`Classroom eval with ${m} failed:`, e);
-          }
+        try {
+          raw = await generateWithRetry({
+            contents: prompt,
+            responseMimeType: "application/json",
+          });
+        } catch (e) {
+          console.warn("Classroom eval generation failed:", e);
         }
 
         try {
@@ -934,21 +1034,13 @@ Return STRICT JSON matching this schema:
 }`;
 
         let raw = "";
-        const modelCandidates = [GEMINI_MODEL];
-        for (const m of modelCandidates) {
-          try {
-            const resp = await client.models.generateContent({
-              model: m,
-              contents: prompt,
-              config: { responseMimeType: "application/json" },
-            });
-            if (resp.text && resp.text.trim()) {
-              raw = resp.text;
-              break;
-            }
-          } catch (e) {
-            console.warn(`Classroom finish with ${m} failed:`, e);
-          }
+        try {
+          raw = await generateWithRetry({
+            contents: prompt,
+            responseMimeType: "application/json",
+          });
+        } catch (e) {
+          console.warn("Classroom finish generation failed:", e);
         }
 
         try {
