@@ -246,6 +246,14 @@ export const CLASSROOM_SUBJECT_PRESETS = [
 
 export const CLASSROOM_MODES = [
   {
+    id: "conversation" as const,
+    title: "Razgovorni čas (pričamo)",
+    subtitle: "Nastavnik ti priča lekciju naglas i vodi dijalog: objašnjava, priča priče, pita te",
+    badge: "Preporučeno",
+    questionCount: 0,
+    icon: "💬",
+  },
+  {
     id: "oral_exam" as const,
     title: "Usmeno ispitivanje pred tablom",
     subtitle: "5 Pitanja sa ocenjivanjem (1-5), podpitanjima i đačkom knjižicom",
@@ -488,6 +496,54 @@ export async function evaluateAnswerApi(params: {
         : `Pitanje #${params.currentQuestionNumber + 1}: Koji je sledeći najvažniji zakon ili pravilo u okviru teme "${params.topic}"?`,
       nextQuestionHint: "Seti se praktične primene.",
       isFinalQuestion: isFinal,
+    };
+  }
+}
+
+// Conversation-mode API call: natural back-and-forth tutoring dialogue
+export async function converseClassroomApi(params: {
+  animalTeacher: AnimalTeacher;
+  subject: string;
+  topic: string;
+  conversation: Array<{ role: "teacher" | "student"; content: string }>;
+  intent?: string;
+  language?: string;
+  signal?: AbortSignal;
+}): Promise<{
+  reply: string;
+  question: string;
+  reaction: string;
+  intent: string;
+}> {
+  try {
+    const res = await fetch("/api/ai/classroom", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "converse",
+        animalTeacher: params.animalTeacher,
+        subject: params.subject,
+        topic: params.topic,
+        conversation: params.conversation,
+        intent: params.intent || "free",
+        language: params.language || "sr",
+      }),
+      signal: params.signal,
+    });
+
+    if (!res.ok) {
+      throw new Error(`Classroom converse error: ${res.status}`);
+    }
+
+    return await res.json();
+  } catch (err) {
+    console.warn("Classroom converse fallback:", err);
+    const topic = params.topic;
+    return {
+      reply: `Razumem te! Hajde da polako razbijemo temu "${topic}" na male delove. Hoćeš da ti objasnim osnovu, da ti ispričam kao priču, ili da te odmah pitam nešto?`,
+      question: "Odakle da počnemo?",
+      reaction: `${params.animalTeacher.title} te podstiče osmehom. ${params.animalTeacher.emoji}`,
+      intent: params.intent || "free",
     };
   }
 }

@@ -70,6 +70,12 @@ async function startServer() {
           headers: {
             "User-Agent": "aistudio-build",
           },
+          // Per-call timeout so a stuck request can't hang the endpoint forever.
+          timeout: 30_000,
+          // Disable the SDK's own internal retries (default: 5 attempts with up
+          // to 60s backoff each). generateWithRetry below already handles
+          // retries with a bounded delay, so nested retries only multiply latency.
+          retryOptions: { attempts: 1 },
         },
       });
     }
@@ -90,9 +96,29 @@ async function startServer() {
   // ------------------------------------------------------------------
   // Gemini call helper with automatic retry on transient failures
   // (503 UNAVAILABLE / high demand, 429 rate limit, 500, timeouts).
+  //
+  // Resilience model:
+  //   1. Retry the primary model (GEMINI_MODEL) with exponential backoff.
+  //   2. If it keeps failing (or its daily free-tier quota is exhausted),
+  //      move on to the next model in GEMINI_MODEL_CHAIN so the app keeps
+  //      working instead of falling back to canned answers.
+  //   3. Respect a total time budget so a single request can't hang forever.
   // ------------------------------------------------------------------
   const GEMINI_MAX_ATTEMPTS = 3;
   const GEMINI_RETRY_DELAY_MS = 1200;
+  const GEMINI_TOTAL_BUDGET_MS = 75_000;
+
+  /** Tried in order after the configured GEMINI_MODEL (skip duplicates). */
+  const GEMINI_MODEL_CHAIN = [
+    "gemini-flash-lite-latest",
+    "gemini-3.1-flash-lite",
+  ];
+
+  /**
+   * model -> epoch ms until which that model reports an exhausted daily quota.
+   * Lets us skip a model we know has no quota left instead of burning retries.
+   */
+  const geminiQuotaCooldown = new Map<string, number>();
 
   function isTransientGeminiError(err: unknown): boolean {
     const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
@@ -113,6 +139,40 @@ async function startServer() {
     );
   }
 
+  /**
+   * If Gemini reports an exhausted DAILY quota with a "retry in 15h48m" /
+   * "retryDelay":"56896s" hint, return the epoch ms when it resets (null if
+   * the error carries no such hint).
+   */
+  function readQuotaResetAt(err: unknown): number | null {
+    const msg = err instanceof Error ? err.message : String(err ?? "");
+    const hms = msg.match(/retry in (?:(\d+)h)?(?:(\d+)m)?([\d.]+)s/i);
+    if (hms) {
+      const secs =
+        Number(hms[1] || 0) * 3600 + Number(hms[2] || 0) * 60 + Number(hms[3] || 0);
+      if (secs > 0) return Date.now() + secs * 1000;
+    }
+    const delay = msg.match(/"retryDelay"\s*:\s*"?(\d+(?:\.\d+)?)s/i);
+    if (delay && Number(delay[1]) > 0) {
+      return Date.now() + Number(delay[1]) * 1000;
+    }
+    return null;
+  }
+
+  /** Model priority order: primary first, cooled-down models pushed to the back. */
+  function geminiModelChain(preferred?: string): string[] {
+    const primary = (preferred || GEMINI_MODEL).trim();
+    const chain: string[] = [];
+    for (const m of [primary, ...GEMINI_MODEL_CHAIN]) {
+      if (m && !chain.includes(m)) chain.push(m);
+    }
+    const now = Date.now();
+    const ready = chain.filter((m) => (geminiQuotaCooldown.get(m) || 0) <= now);
+    const cooling = chain.filter((m) => (geminiQuotaCooldown.get(m) || 0) > now);
+    // If everything is cooling down, still try — a real answer beats a canned one.
+    return ready.length > 0 ? [...ready, ...cooling] : chain;
+  }
+
   function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -125,40 +185,75 @@ async function startServer() {
     responseMimeType?: string;
   }
 
-  /** Calls Gemini, retrying transient errors with a short backoff. */
+  /** Calls Gemini, retrying transient errors and falling back across models. */
   async function generateWithRetry(req: GeminiRequest): Promise<string> {
-    const modelName = (req.model || GEMINI_MODEL).trim();
+    const startedAt = Date.now();
+    const chain = geminiModelChain(req.model);
     let lastErr: unknown = null;
+    let outOfTime = false;
 
-    for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt++) {
-      try {
-        const client = getGeminiClient();
-        const config: Record<string, unknown> = {};
-        if (req.systemInstruction) config.systemInstruction = req.systemInstruction;
-        if (req.responseMimeType) config.responseMimeType = req.responseMimeType;
+    outer: for (const modelName of chain) {
+      for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt++) {
+        if (Date.now() - startedAt > GEMINI_TOTAL_BUDGET_MS) {
+          outOfTime = true;
+          break outer;
+        }
 
-        const response = await client.models.generateContent({
-          model: modelName,
-          contents: req.contents as never,
-          config: config as never,
-        });
-        const text = (response.text || "").trim();
-        if (text) return text;
-        lastErr = new Error("Model je vratio prazan odgovor.");
-      } catch (err: unknown) {
-        lastErr = err;
-        const transient = isTransientGeminiError(err);
-        console.warn(
-          `Gemini attempt ${attempt}/${GEMINI_MAX_ATTEMPTS} (${modelName}) failed${transient ? " (transient)" : ""}:`,
-          err instanceof Error ? err.message : err
-        );
-        if (!transient) break;
-        if (attempt < GEMINI_MAX_ATTEMPTS) {
-          await sleep(GEMINI_RETRY_DELAY_MS * attempt);
+        try {
+          const client = getGeminiClient();
+          const config: Record<string, unknown> = {};
+          if (req.systemInstruction) config.systemInstruction = req.systemInstruction;
+          if (req.responseMimeType) config.responseMimeType = req.responseMimeType;
+
+          const response = await client.models.generateContent({
+            model: modelName,
+            contents: req.contents as never,
+            config: config as never,
+          });
+          const text = (response.text || "").trim();
+          if (text) {
+            if (modelName !== chain[0]) {
+              console.warn(`Gemini answered via fallback model: ${modelName}`);
+            }
+            return text;
+          }
+          lastErr = new Error("Model je vratio prazan odgovor.");
+        } catch (err: unknown) {
+          lastErr = err;
+          const message = err instanceof Error ? err.message : String(err ?? "");
+
+          // Daily quota gone for this model — don't waste retries on it.
+          const quotaResetAt = readQuotaResetAt(err);
+          if (quotaResetAt) {
+            geminiQuotaCooldown.set(modelName, quotaResetAt);
+            console.warn(
+              `Gemini ${modelName}: daily quota exhausted until ${new Date(
+                quotaResetAt
+              ).toLocaleTimeString()}, switching to next model.`
+            );
+            break;
+          }
+
+          const transient = isTransientGeminiError(err);
+          console.warn(
+            `Gemini attempt ${attempt}/${GEMINI_MAX_ATTEMPTS} (${modelName}) failed${transient ? " (transient)" : ""}:`,
+            message
+          );
+          // Non-transient (bad key, 404 model...) — try the next model instead.
+          if (!transient) break;
+          if (attempt < GEMINI_MAX_ATTEMPTS) {
+            const backoff =
+              GEMINI_RETRY_DELAY_MS * Math.pow(2, attempt - 1) +
+              Math.floor(Math.random() * 500);
+            await sleep(backoff);
+          }
         }
       }
     }
 
+    if (outOfTime && lastErr instanceof Error) {
+      throw new Error(`Gemini: vreme za odgovor je isteklo (${lastErr.message})`);
+    }
     throw lastErr instanceof Error
       ? lastErr
       : new Error("Gemini model nije vratio odgovor.");
@@ -876,6 +971,8 @@ async function startServer() {
         studentAnswer = "",
         previousQuestion = "",
         language = "sr",
+        conversation = [],
+        intent = "free",
       } = req.body;
 
       const teacherName = animalTeacher?.title || "Profesor Feliks đź¦Š";
@@ -928,6 +1025,102 @@ Return STRICT JSON matching this schema:
             question: `Za poÄŤetak ispitivanja: Koja je osnovna definicija i kljuÄŤni znaÄŤaj za "${topic}"?`,
             hint: `Razmisli o osnovnim pojmovima i ÄŤemu to sluĹľi u stvarnom svetu.`,
             animalReaction: `${teacherName} paĹľljivo nameĹˇta beleĹľnicu i ÄŤeka tvoj odgovor.`,
+          });
+        }
+        return;
+      }
+
+      // ---------------------------------------------------------------
+      // CONVERSATION MODE: a natural, back-and-forth tutoring dialogue.
+      // The teacher explains, tells stories, re-explains on "ne razumem",
+      // and asks questions — like two people actually talking.
+      // ---------------------------------------------------------------
+      if (action === "converse") {
+        const intentRaw = String(intent || "free").trim().toLowerCase();
+        const KNOWN_INTENTS = ["free", "start", "explain", "story", "dont_understand", "simpler", "ask", "answer", "quiz", "continue", "example", "done"];
+        const cleanIntent: string = KNOWN_INTENTS.includes(intentRaw) ? intentRaw : "free";
+
+        const transcript = Array.isArray(conversation)
+          ? conversation
+              .map((m: { role?: string; content?: string }) => {
+                const role = m?.role === "student" ? "Učenik" : teacherName;
+                return `${role}: ${String(m?.content || "").trim()}`;
+              })
+              .filter((line: string) => line.split(": ").slice(1).join(": ").length > 0)
+              .slice(-14)
+              .join("\n")
+          : "";
+
+        const intentGuide: Record<string, string> = {
+          start: `Open the lesson warmly. Greet the student, introduce the topic "${topic}" in ONE short spoken paragraph, then naturally ask if they're ready to begin. Do NOT dump the whole lesson at once — this is a conversation.`,
+          explain: `Explain the requested part of "${topic}" clearly and step by step. Speak in short, natural sentences like a real teacher sitting beside the student. Use one small everyday analogy. End by checking in: ask "Je l' jasno?" or a tiny check question.`,
+          story: `Retell "${topic}" as an engaging little STORY (a tale, a scenario, a "šala" / gossip-style narrative) with characters and a beginning-middle-end, so it sticks. Keep it vivid and fun but still accurate. End with the one key takeaway the story teaches.`,
+          dont_understand: `The student says they DON'T understand. Do NOT repeat the same explanation. Re-explain "${topic}" from a completely different angle: a simpler word choice, a concrete real-world analogy, or a tiny step-by-step example. Go slower and gentler. Then ask a very easy check question to confirm it landed.`,
+          simpler: `The student wants it EVEN SIMPLER. Break "${topic}" down to the absolute basics — plain everyday language, one tiny example, no jargon. Speak like explaining to a friend. End with a warm, easy question.`,
+          ask: `Ask the student ONE thoughtful question about "${topic}" to test understanding. Keep it short and answerable. Wait for their reply.`,
+          answer: `Evaluate the student's answer about "${topic}". Be warm and encouraging first, then gently correct or confirm. Briefly give the right answer if needed. Then ask a natural follow-up question to keep the conversation going.`,
+          quiz: `Give a short pop-quiz question on "${topic}". One question at a time, then wait for the answer.`,
+          example: `Give ONE concrete, worked example related to "${topic}". Walk through it step by step in a conversational way, as if showing the student on the blackboard. Then ask if they want another example or to move on.`,
+          continue: `Continue the lesson naturally from where the conversation left off. Introduce the next small piece of "${topic}" in a short spoken chunk, then check in.`,
+          done: `Wrap up the lesson. Warmly summarize the 2-3 main takeaways of "${topic}", praise the student's curiosity, and invite them to come back or pick a new topic.`,
+          free: `Respond naturally to what the student just said. If they asked a question, answer it simply. If it's small talk or "pomozi", respond helpfully and steer back to learning "${topic}". Keep replies SHORT and spoken (2-4 sentences), like real dialogue. Always end with a question or an invitation to keep the conversation going.`,
+        };
+
+        const prompt = `You are ${teacherName} (${teacherSpecies}), a warm, charming animal teacher having a LIVE one-on-one conversation with your student.
+SUBJECT: "${subject}"
+TOPIC / LESSON: "${topic}"
+STUDENT'S INTENT / MODE: ${cleanIntent}
+INTENT GUIDANCE: ${intentGuide[cleanIntent] || intentGuide.free}
+LANGUAGE: Respond strictly in ${isSr ? "Serbian (Latinica, prirodan, topao profesorski ton — kao da stvarno pričate)" : "English"}.
+
+CONVERSATION SO FAR (most recent last):
+${transcript || "(conversation just starting)"}
+
+STYLE RULES — THIS IS A REAL CONVERSATION, NOT AN ESSAY:
+- Speak like a real person talking out loud: short sentences, natural, warm, a little personality and charm.
+- Your reply will be READ ALOUD with a voice, so keep it SPOKEN-friendly: 2-6 short sentences unless the student explicitly asked for a full lesson/story (then up to ~10 sentences).
+- Never return giant walls of Markdown, tables, or code blocks. Plain spoken prose with maybe ONE bold key term.
+- You may add 1-2 gentle spoken emotion tags for expressive TTS (e.g. [toplo], [uz smešak], [uzdah], [uzbuđeno]) ONLY at the start of a sentence.
+- ALWAYS end with a question or an invitation, so the student knows to reply. Keep the ball in their court.
+- Match the INTENT above precisely.
+
+Also produce a SHORT on-screen action hint and an optional follow-up question.
+
+Return STRICT JSON matching this schema:
+{
+  "reply": "Your spoken conversational reply (will be read aloud via voice)",
+  "question": "A short follow-up question to keep the dialogue going (can be empty string)",
+  "reaction": "One short cute physical reaction (e.g. adjusts glasses, wiggles ears, taps the desk)"
+}`;
+
+        let raw = "";
+        try {
+          raw = await generateWithRetry({
+            contents: prompt,
+            responseMimeType: "application/json",
+          });
+        } catch (e) {
+          console.warn("Classroom converse generation failed:", e);
+        }
+
+        const fallbackReply = cleanIntent === "dont_understand" || cleanIntent === "simpler"
+          ? `Hajde da to pogledamo drugačije. Zamisli "${topic}" kao nešto iz stvarnog života — biće ti mnogo jasnije. Je l' ti ovako zvuči razumljivije?`
+          : `Razumem te! Hajde da polako razbijemo temu "${topic}" na male delove. Odakle da počnemo — hoćeš da ti objasnim osnovu ili da ti ispričam kao priču?`;
+
+        try {
+          const parsed = JSON.parse(raw);
+          res.json({
+            reply: parsed.reply || fallbackReply,
+            question: parsed.question || "",
+            reaction: parsed.reaction || `${teacherName} te pažljivo sluša. ${teacherName.split(" ").pop()} pipka bradu i klima glavom.`,
+            intent: cleanIntent,
+          });
+        } catch {
+          res.json({
+            reply: fallbackReply,
+            question: "Hoćeš da ti objasnim osnovu teme ili da ti ispričam kao priču?",
+            reaction: `${teacherName} se osmehuje i nestrpljivo čeka tvoj odgovor.`,
+            intent: cleanIntent,
           });
         }
         return;

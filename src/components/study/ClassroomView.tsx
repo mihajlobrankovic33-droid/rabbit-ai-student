@@ -13,6 +13,7 @@ import {
   startClassroomSessionApi,
   evaluateAnswerApi,
   finishClassroomSessionApi,
+  converseClassroomApi,
   createSpeechRecognizer,
 } from "@/services/study/animalTeacherService";
 import type {
@@ -34,6 +35,7 @@ import {
   Mic,
   MicOff,
   RotateCcw,
+  Send,
   Sparkles,
   Trash2,
   Volume2,
@@ -93,6 +95,14 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
   const [isListening, setIsListening] = useState(false);
   const speechRecognizerRef = useRef<{ start: () => void; stop: () => void; isSupported: boolean } | null>(null);
 
+  // Conversation mode state (razgovorni čas)
+  const [isConversing, setIsConversing] = useState(false);
+  const [convoMessages, setConvoMessages] = useState<Array<{ id: string; role: "teacher" | "student"; content: string; reaction?: string }>>([]);
+  const [convoInput, setConvoInput] = useState("");
+  const [isConvoThinking, setIsConvoThinking] = useState(false);
+  const convoEndRef = useRef<HTMLDivElement>(null);
+  const convoAbortRef = useRef<AbortController | null>(null);
+
   // Load history on mount
   useEffect(() => {
     setPastSessions(getClassroomSessions(currentUserId));
@@ -105,6 +115,13 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
     setActiveAnimalTeacher(teacher.id);
     toast.success(`${teacher.title} je sada tvoj nastavnik! ${teacher.emoji}`);
   };
+
+  // Auto-scroll conversation to the newest message
+  useEffect(() => {
+    if (isConversing) {
+      convoEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [convoMessages, isConvoThinking, isConversing]);
 
   // Setup speech recognizer for active language
   useEffect(() => {
@@ -153,6 +170,121 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
     });
   };
 
+  // ------------------------------------------------------------------------
+  // CONVERSATION MODE (razgovorni čas): natural back-and-forth tutoring
+  // ------------------------------------------------------------------------
+  const cleanTtsText = (raw: string): string =>
+    raw
+      .replace(/\[[^\]]{1,40}\]/g, "")
+      .replace(/[*_#`>]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const startConversation = async (subject: string, topicText: string) => {
+    stopSpeaking();
+    setIsConversing(true);
+    setConvoMessages([]);
+    setIsConvoThinking(true);
+
+    const controller = new AbortController();
+    convoAbortRef.current = controller;
+
+    try {
+      const data = await converseClassroomApi({
+        animalTeacher: activeTeacher,
+        subject,
+        topic: topicText,
+        conversation: [],
+        intent: "start",
+        language: lang,
+        signal: controller.signal,
+      });
+
+      const teacherMsg = {
+        id: `convo-${Date.now()}`,
+        role: "teacher" as const,
+        content: data.reply,
+        reaction: data.reaction,
+      };
+      setConvoMessages([teacherMsg]);
+      playVoice(cleanTtsText(data.reply));
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        console.error("Conversation start error:", e);
+        toast.error("Nastavnik trenutno ne može da se uključi. Pokušaj ponovo.");
+        setIsConversing(false);
+      }
+    } finally {
+      setIsConvoThinking(false);
+    }
+  };
+
+  const sendConvoMessage = async (
+    text: string,
+    intent: string = "free"
+  ) => {
+    const cleanText = text.trim();
+    if (!cleanText && intent === "free") return;
+    if (isConvoThinking) return;
+
+    stopSpeaking();
+
+    const studentMsg = {
+      id: `convo-student-${Date.now()}`,
+      role: "student" as const,
+      content: cleanText || `(${intent})`,
+    };
+
+    const historyForApi: Array<{ role: "teacher" | "student"; content: string }> = [
+      ...convoMessages.map((m) => ({ role: m.role, content: m.content })),
+      { role: "student", content: cleanText || studentMsg.content },
+    ];
+
+    setConvoMessages((prev) => [...prev, studentMsg]);
+    setConvoInput("");
+    setIsConvoThinking(true);
+
+    const controller = new AbortController();
+    convoAbortRef.current = controller;
+
+    try {
+      const data = await converseClassroomApi({
+        animalTeacher: activeTeacher,
+        subject: selectedSubject.name,
+        topic: customTopic.trim() || topic,
+        conversation: historyForApi,
+        intent,
+        language: lang,
+        signal: controller.signal,
+      });
+
+      const teacherMsg = {
+        id: `convo-${Date.now()}`,
+        role: "teacher" as const,
+        content: data.reply,
+        reaction: data.reaction,
+      };
+      setConvoMessages((prev) => [...prev, teacherMsg]);
+      playVoice(cleanTtsText(data.reply));
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        console.error("Conversation error:", e);
+        toast.error("Došlo je do greške u razgovoru. Pokušaj ponovo.");
+      }
+    } finally {
+      setIsConvoThinking(false);
+    }
+  };
+
+  const endConversation = () => {
+    stopSpeaking();
+    convoAbortRef.current?.abort();
+    setIsConversing(false);
+    setConvoMessages([]);
+    setConvoInput("");
+    setIsConvoThinking(false);
+  };
+
   // Start exam
   const handleStartExam = async () => {
     const finalSubject = customSubject.trim() || selectedSubject.name;
@@ -160,6 +292,17 @@ export function ClassroomView({ onOpenNotes, onOpenChat }: ClassroomViewProps) {
 
     if (!finalTopic) {
       toast.error("Molimo unesi ili izaberi temu za ispitivanje!");
+      return;
+    }
+
+    // Conversation mode -> start a natural dialogue instead of a rigid exam
+    if (selectedMode.id === "conversation") {
+      setIsStarting(true);
+      try {
+        await startConversation(finalSubject, finalTopic);
+      } finally {
+        setIsStarting(false);
+      }
       return;
     }
 
@@ -438,6 +581,173 @@ ${activeSession.turns
     setPastSessions(getClassroomSessions(currentUserId));
     toast.success("Ispitivanje obrisano iz istorije.");
   };
+
+  // --------------------------------------------------------------------------
+  // RENDER VIEW: Active Conversation (razgovorni čas)
+  // --------------------------------------------------------------------------
+  if (isConversing) {
+    return (
+      <div className="space-y-4 max-w-4xl mx-auto pb-12">
+        {/* Conversation Top Bar */}
+        <div className="flex items-center justify-between rounded-2xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-2xl shadow-inner">
+              {activeTeacher.emoji}
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-sm sm:text-base text-foreground">
+                  {activeTeacher.title}
+                </h3>
+                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Razgovor uživo
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground truncate max-w-xs sm:max-w-md">
+                Tema: <strong className="text-foreground">{customTopic.trim() || topic}</strong> ({selectedSubject.name})
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (voiceEnabled) stopSpeaking();
+                setVoiceEnabled(!voiceEnabled);
+              }}
+              className={`cursor-pointer rounded-xl p-2 text-xs transition-all ${
+                voiceEnabled
+                  ? "bg-primary/15 text-primary hover:bg-primary/25"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+              title={voiceEnabled ? "Isključi glas nastavnika" : "Uključi glas nastavnika"}
+            >
+              {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            </button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={endConversation}
+              className="text-xs text-muted-foreground hover:text-destructive"
+            >
+              <RotateCcw className="h-3.5 w-3.5 mr-1" />
+              Završi razgovor
+            </Button>
+          </div>
+        </div>
+
+        {/* Conversation Transcript */}
+        <div className="rounded-3xl border border-border/80 bg-card shadow-sm p-4 sm:p-5">
+          <div className="space-y-4 max-h-[52vh] overflow-y-auto pr-1">
+            {convoMessages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex items-start gap-3 ${msg.role === "student" ? "flex-row-reverse" : ""}`}
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-lg">
+                  {msg.role === "teacher" ? activeTeacher.emoji : "🧑‍🎓"}
+                </span>
+                <div
+                  className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed max-w-[80%] ${
+                    msg.role === "teacher"
+                      ? "bg-primary/5 border border-primary/15 text-foreground"
+                      : "bg-muted/60 border border-border/70 text-foreground"
+                  }`}
+                >
+                  <span className="block text-[10px] font-extrabold text-primary uppercase tracking-wider mb-0.5">
+                    {msg.role === "teacher" ? activeTeacher.title : "Ti"}
+                  </span>
+                  <p className="whitespace-pre-line">{msg.content}</p>
+                </div>
+              </div>
+            ))}
+
+            {isConvoThinking && (
+              <div className="flex items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-lg">
+                  {activeTeacher.emoji}
+                </span>
+                <div className="rounded-2xl bg-primary/5 border border-primary/15 px-4 py-3 text-sm text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "120ms" }} />
+                  <span className="h-2 w-2 rounded-full bg-primary animate-bounce" style={{ animationDelay: "240ms" }} />
+                  <span className="ml-1">{activeTeacher.title} razmišlja...</span>
+                </div>
+              </div>
+            )}
+            <div ref={convoEndRef} />
+          </div>
+        </div>
+
+        {/* Quick Intent Buttons (modes) */}
+        <div className="rounded-2xl border border-border/70 bg-card/60 p-3 shadow-xs space-y-2">
+          <span className="text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
+            <Sparkles className="h-3 w-3 text-primary" /> Brze komande:
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={isConvoThinking} onClick={() => sendConvoMessage("Objasni mi temeljno", "explain")} className="cursor-pointer rounded-xl bg-primary/10 text-primary px-3 py-1.5 text-xs font-bold hover:bg-primary/20 transition-all disabled:opacity-50">📖 Objasni mi</button>
+            <button type="button" disabled={isConvoThinking} onClick={() => sendConvoMessage("Ispričaj mi kao priču", "story")} className="cursor-pointer rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1.5 text-xs font-bold hover:bg-amber-500/20 transition-all disabled:opacity-50">📚 Ispričaj kao priču</button>
+            <button type="button" disabled={isConvoThinking} onClick={() => sendConvoMessage("Ne razumem, objasni drugačije", "dont_understand")} className="cursor-pointer rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 px-3 py-1.5 text-xs font-bold hover:bg-rose-500/20 transition-all disabled:opacity-50">🤔 Ne razumem</button>
+            <button type="button" disabled={isConvoThinking} onClick={() => sendConvoMessage("Budi još jednostavniji", "simpler")} className="cursor-pointer rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 px-3 py-1.5 text-xs font-bold hover:bg-sky-500/20 transition-all disabled:opacity-50">🪁 Još jednostavnije</button>
+            <button type="button" disabled={isConvoThinking} onClick={() => sendConvoMessage("Daj mi primer", "example")} className="cursor-pointer rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-xs font-bold hover:bg-emerald-500/20 transition-all disabled:opacity-50">🔬 Primer</button>
+            <button type="button" disabled={isConvoThinking} onClick={() => sendConvoMessage("Pitaj me da proveriš znanje", "ask")} className="cursor-pointer rounded-xl bg-violet-500/10 text-violet-600 dark:text-violet-400 px-3 py-1.5 text-xs font-bold hover:bg-violet-500/20 transition-all disabled:opacity-50">❓ Pitaj me</button>
+            <button type="button" disabled={isConvoThinking} onClick={() => sendConvoMessage("Nastavi dalje sa lekcijom", "continue")} className="cursor-pointer rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 px-3 py-1.5 text-xs font-bold hover:bg-teal-500/20 transition-all disabled:opacity-50">➡️ Nastavi</button>
+            <button type="button" disabled={isConvoThinking} onClick={() => sendConvoMessage("Hvala, to je to za danas", "done")} className="cursor-pointer rounded-xl bg-muted text-muted-foreground px-3 py-1.5 text-xs font-bold hover:bg-muted/80 transition-all disabled:opacity-50">🏁 Završi</button>
+          </div>
+        </div>
+
+        {/* Free-text input */}
+        <div className="rounded-3xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm space-y-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleSpeechRecognition}
+              className={`cursor-pointer inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-all shrink-0 ${
+                isListening
+                  ? "bg-rose-500 text-white animate-pulse shadow-md"
+                  : "bg-primary/10 text-primary hover:bg-primary/20"
+              }`}
+              title="Govori umesto kucanja"
+            >
+              {isListening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">{isListening ? "Slušam..." : "Govori"}</span>
+            </button>
+
+            <textarea
+              rows={1}
+              value={convoInput}
+              onChange={(e) => setConvoInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendConvoMessage(convoInput, "free");
+                }
+              }}
+              placeholder={`Porazgovaraj sa ${activeTeacher.title} — postavi pitanje, zatraži objašnjenje...`}
+              className="flex-1 rounded-2xl border border-border/80 bg-background/60 px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-hidden focus:ring-2 focus:ring-primary/20 transition-all resize-none"
+              disabled={isConvoThinking}
+            />
+
+            <Button
+              size="sm"
+              onClick={() => sendConvoMessage(convoInput, "free")}
+              disabled={isConvoThinking || !convoInput.trim()}
+              className="cursor-pointer font-extrabold rounded-xl px-4 gap-2 shrink-0"
+            >
+              <Send className="h-4 w-4" />
+              <span className="hidden sm:inline">Pošalji</span>
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            💡 Pritisni <strong>Enter</strong> da pošalješ. Nastavnik sve izgovara naglas — možeš da ga prekineš bilo komandom.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // --------------------------------------------------------------------------
   // RENDER VIEW: Active Classroom Oral Exam
@@ -1075,7 +1385,7 @@ ${activeSession.turns
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-xl">{mode.icon}</span>
                   <span className="rounded-lg bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
-                    {mode.questionCount} Pitanja
+                    {mode.id === "conversation" ? "Dijalog" : `${mode.questionCount} Pitanja`}
                   </span>
                 </div>
                 <h4 className="font-extrabold text-xs text-foreground leading-tight">{mode.title}</h4>
@@ -1095,9 +1405,18 @@ ${activeSession.turns
           </h3>
         </div>
         <p className="text-xs text-muted-foreground max-w-md mx-auto">
-          Izaći ćeš pred tablu sa temom:{" "}
-          <strong className="text-foreground">{customTopic.trim() || topic}</strong>. Nastavnik će
-          postavljati pitanja jedno po jedno!
+          {selectedMode.id === "conversation" ? (
+            <>
+              Tema: <strong className="text-foreground">{customTopic.trim() || topic}</strong>. Nastavnik će
+              ti <strong className="text-foreground">pričati lekciju naglas</strong> i voditi pravi razgovor — možeš da ga prekineš, tražiš objašnjenje ili kažeš "ne razumem"!
+            </>
+          ) : (
+            <>
+              Izaći ćeš pred tablu sa temom:{" "}
+              <strong className="text-foreground">{customTopic.trim() || topic}</strong>. Nastavnik će
+              postavljati pitanja jedno po jedno!
+            </>
+          )}
         </p>
 
         <Button
@@ -1109,7 +1428,12 @@ ${activeSession.turns
           {isStarting ? (
             <>
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-              Nastavnik priprema tablu i dnevnik...
+              {selectedMode.id === "conversation" ? "Nastavnik se uključuje u razgovor..." : "Nastavnik priprema tablu i dnevnik..."}
+            </>
+          ) : selectedMode.id === "conversation" ? (
+            <>
+              Započni razgovor sa nastavnikom 💬
+              <Sparkles className="h-4 w-4" />
             </>
           ) : (
             <>
