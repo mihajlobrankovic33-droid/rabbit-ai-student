@@ -46,6 +46,12 @@ export interface Message {
 
 const CONTACTS_KEY = "study_buddy_contacts";
 
+/**
+ * Hard cap on how many friends one student can have. Keeps the number of
+ * Supabase lookups/polling queries small (and the list readable on a phone).
+ */
+export const MAX_CONTACTS = 10;
+
 /** True when messages are stored in Supabase instead of the local server. */
 export function isCloudMessages(): boolean {
   return isSupabaseConfigured;
@@ -74,13 +80,19 @@ export function getContacts(userId?: string): Contact[] {
   }
 }
 
-export function addContact(contact: Contact, userId?: string): void {
+/** Saves a friend. Returns false when the list is already at MAX_CONTACTS. */
+export function addContact(contact: Contact, userId?: string): boolean {
   try {
-    const list = getContacts(userId).filter((c) => c.userId !== contact.userId);
+    const current = getContacts(userId);
+    const isNew = !current.some((c) => c.userId === contact.userId);
+    if (isNew && current.length >= MAX_CONTACTS) return false;
+    const list = current.filter((c) => c.userId !== contact.userId);
     list.unshift(contact);
     localStorage.setItem(contactsKey(userId), JSON.stringify(list));
+    return true;
   } catch (err) {
     console.error("Failed to save contact:", err);
+    return false;
   }
 }
 

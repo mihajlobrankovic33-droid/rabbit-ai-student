@@ -22,6 +22,7 @@ import {
   getContacts,
   lookupCode,
   lookupUser,
+  MAX_CONTACTS,
   registerCode,
   removeContact,
   sendMessage,
@@ -212,13 +213,21 @@ export function MessagesView({ userId, userName }: MessagesViewProps) {
       toast.error(t("ownCodeErr"));
       return;
     }
+    if (contacts.length >= MAX_CONTACTS) {
+      toast.error(t("maxFriends"));
+      return;
+    }
     setAdding(true);
     try {
       const profile = await lookupCode(code, me);
-      addContact(
+      const saved = addContact(
         { ...profile, addedAt: new Date().toISOString() },
         me
       );
+      if (!saved) {
+        toast.error(t("maxFriends"));
+        return;
+      }
       setContacts(getContacts(me));
       setCodeInput("");
       toast.success(`${t("contactAdded")}: ${profile.name}`);
@@ -227,7 +236,7 @@ export function MessagesView({ userId, userName }: MessagesViewProps) {
     } finally {
       setAdding(false);
     }
-  }, [codeInput, myCode, me, t]);
+  }, [codeInput, myCode, contacts, me, t]);
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
@@ -404,7 +413,7 @@ export function MessagesView({ userId, userName }: MessagesViewProps) {
       ) : (
         <section className="rounded-3xl border border-border/80 bg-card p-4 sm:p-5 shadow-md">
           <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            {t("messagesTab")} ({contacts.length})
+            {t("messagesTab")} ({contacts.length}/{MAX_CONTACTS})
           </h3>
 
           {contacts.length === 0 ? (
