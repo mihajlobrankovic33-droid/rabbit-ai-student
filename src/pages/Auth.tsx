@@ -85,6 +85,15 @@ function friendlyAuthError(err: unknown): string {
   ) {
     return "Google sign-in is not configured yet. Please continue with Guest mode or email!";
   }
+  if (lower.includes("invalid login credentials")) {
+    return "Wrong email or password. If you just created the account, confirm your email first — then sign in again.";
+  }
+  if (lower.includes("email not confirmed")) {
+    return "Email not confirmed yet — open the message we sent you, then try signing in again.";
+  }
+  if (lower.includes("already registered") || lower.includes("user already")) {
+    return "An account with this email already exists — switch to Log in.";
+  }
   if (
     lower.includes("invalid credential") ||
     lower.includes("invalid_email_or_password") ||
