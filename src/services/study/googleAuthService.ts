@@ -1,8 +1,9 @@
 /**
  * Real Google Sign-In (Google Identity Services, OAuth 2.0 ID token flow).
  *
- * The Client ID is public by design (it ships in every browser bundle).
- * Set VITE_GOOGLE_CLIENT_ID in .env to override the default.
+ * The Client ID is public by design (it ships in every browser bundle),
+ * but it is NOT hardcoded here — set VITE_GOOGLE_CLIENT_ID in .env so no
+ * copy of it ever lands in git.
  *
  * IMPORTANT: in Google Cloud Console → Credentials → your Web client →
  * "Authorized JavaScript origins" you must add the origins you run on, e.g.
@@ -18,13 +19,10 @@ export interface GoogleProfile {
   avatar?: string;
 }
 
-const FALLBACK_CLIENT_ID =
-  "124760911360-ob0jje6ep9i25utuinskb9iqmmq3n6r5.apps.googleusercontent.com";
-
 const GOOGLE_GSI_SRC = "https://accounts.google.com/gsi/client";
 
 const rawClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
-export const GOOGLE_CLIENT_ID = rawClientId || FALLBACK_CLIENT_ID;
+export const GOOGLE_CLIENT_ID = rawClientId || "";
 
 const SCRIPT_LOAD_TIMEOUT_MS = 12_000;
 

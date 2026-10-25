@@ -26,30 +26,39 @@ npm install     # or bun install
 npm run dev     # starts the app on http://localhost:3000
 ```
 
-### AI keys (`.env` in the project root)
+### Secrets (Supabase `app_secrets` — never in git)
 
-Copy `.env.example` to `.env` and fill in what you need:
+Copy `.env.example` to `.env`. `.env` holds only these four entries:
 
 | Key | Needed for | Notes |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | Chat agent, notes, classroom exam | Required for the cloud brain. Get a free key at https://aistudio.google.com/apikey |
-| `GEMINI_MODEL` | *(optional)* | Overrides the single model used everywhere. Default: `gemini-flash-latest` |
-| `WOLFRAM_APPID` | Exact formulas & answers | Free key at https://developer.wolframalpha.com. Adds a verified "🧮 Wolfram Alpha" answer block to math questions. Without it everything still works. |
-| `ELEVENLABS_API_KEY` | Voices | Must start with `sk_` |
+| `VITE_SUPABASE_URL` | login + cloud messages/puškice | project URL (public) |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | client-side Supabase calls | publishable key, safe in the browser |
+| `VITE_GOOGLE_CLIENT_ID` | Google sign-in | public by design |
+| `SUPABASE_SERVICE_ROLE_KEY` | the server reading AI secrets | Dashboard → Project Settings → API → `service_role`. Server-side only, gitignored — **never commit it, never paste it in chat** |
 
-Check that everything is wired up by calling `GET /api/health`.
+The real AI secrets — `GEMINI_API_KEY`, `GEMINI_MODEL`, `WOLFRAM_APPID`,
+`ELEVENLABS_API_KEY` — live in the Supabase table **`app_secrets`**, not in the
+repo. RLS is enabled with no client policies, so the browser app can never read
+them; only this server can, using the service key above. On startup it logs
+just the names:
+
+```
+[secrets] 4 value(s) from Supabase: GEMINI_API_KEY, GEMINI_MODEL, WOLFRAM_APPID, ELEVENLABS_API_KEY
+```
+
+To add or rotate a value, run in the SQL editor:
+
+```sql
+insert into public.app_secrets (name, value) values ('GEMINI_API_KEY', '...')
+on conflict (name) do update set value = excluded.value, updated_at = now();
+```
+
+Local `.env` entries with the same names still work as a fallback when
+Supabase is unreachable. Check everything with `GET /api/health`.
 
 The chat renders LaTeX formulas (`$...$` / `$$...$$`) with KaTeX and always ends
 concrete problems with a bold final answer line.
-
-## Environment Variables
-
-The project is set up with project specific CONVEX_DEPLOYMENT and VITE_CONVEX_URL environment variables on the client side.
-
-The convex server has a separate set of environment variables that are accessible by the convex backend.
-
-Currently, these variables include auth-specific keys: JWKS, JWT_PRIVATE_KEY, and SITE_URL.
-
 
 # Using Authentication (Important!)
 

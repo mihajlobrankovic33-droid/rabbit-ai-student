@@ -37,9 +37,12 @@ loadEnvFile();
 
 /**
  * The single Gemini model used across every AI endpoint.
- * Override with GEMINI_MODEL in .env if you ever need to change it.
+ * Comes from Supabase `app_secrets` (see loadSecretsFromSupabase) or from
+ * GEMINI_MODEL in .env — read at call time, never cached at import time.
  */
-const GEMINI_MODEL = (process.env.GEMINI_MODEL || "gemini-flash-latest").trim();
+function geminiModel(): string {
+  return (process.env.GEMINI_MODEL || "gemini-flash-latest").trim();
+}
 
 function getGeminiApiKey(): string | undefined {
   const key =
@@ -47,7 +50,82 @@ function getGeminiApiKey(): string | undefined {
   return key || undefined;
 }
 
+/**
+ * Server-side secrets (AI / Wolfram / voices) are stored in the Supabase
+ * table `app_secrets`, NOT in the repo — that way nothing secret is ever
+ * committed. The table has RLS enabled with no client policies, so the
+ * browser can't read it; only this server can, using the service_role key
+ * that lives in .env (gitignored). Values are only ever logged by NAME.
+ *
+ * Local .env entries stay as a fallback for when Supabase is unreachable.
+ */
+const SECRET_NAMES = [
+  "GEMINI_API_KEY",
+  "GEMINI_MODEL",
+  "WOLFRAM_APPID",
+  "WOLFRAM_API_KEY",
+  "ELEVENLABS_API_KEY",
+] as const;
+
+async function loadSecretsFromSupabase(): Promise<void> {
+  const supabaseUrl = (
+    process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+    ""
+  ).trim();
+  const serviceKey = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    process.env.SUPABASE_SECRET_KEY ||
+    ""
+  ).trim();
+
+  if (!supabaseUrl || !serviceKey) {
+    console.warn(
+      "[secrets] SUPABASE_SERVICE_ROLE_KEY not set — using local .env values."
+    );
+    return;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/app_secrets?select=name,value`,
+      {
+        headers: {
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+        },
+        signal: controller.signal,
+      }
+    );
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const rows = (await res.json()) as Array<{ name: string; value: string }>;
+    const applied: string[] = [];
+    for (const row of rows) {
+      if (!(SECRET_NAMES as readonly string[]).includes(row.name)) continue;
+      if (!row.value?.trim()) continue;
+      process.env[row.name] = row.value.trim();
+      applied.push(row.name);
+    }
+    console.log(
+      `[secrets] ${applied.length} value(s) from Supabase: ${applied.join(", ") || "(none)"}`
+    );
+  } catch (err) {
+    console.warn(
+      "[secrets] Supabase unreachable, keeping local .env values:",
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 async function startServer() {
+  // Pull AI/Wolfram/voice secrets from Supabase before any route can use them.
+  await loadSecretsFromSupabase();
+
   const app = express();
   const PORT = 3000;
 
@@ -86,7 +164,7 @@ async function startServer() {
   app.get("/api/health", (_req, res) => {
     res.json({
       status: "ok",
-      model: GEMINI_MODEL,
+      model: geminiModel(),
       hasGeminiKey: Boolean(getGeminiApiKey()),
       hasWolframKey: Boolean(process.env.WOLFRAM_APPID?.trim()),
     });
@@ -160,7 +238,7 @@ async function startServer() {
 
   /** Model priority order: primary first, cooled-down models pushed to the back. */
   function geminiModelChain(preferred?: string): string[] {
-    const primary = (preferred || GEMINI_MODEL).trim();
+    const primary = (preferred || geminiModel()).trim();
     const chain: string[] = [];
     for (const m of [primary, ...GEMINI_MODEL_CHAIN]) {
       if (m && !chain.includes(m)) chain.push(m);
@@ -920,7 +998,7 @@ CRITICAL RULES:
    - "fullNotes": (markdown string with detailed structured sections, explanations, step-by-step guidance, and active recall review questions).`;
 
       let raw = "";
-      const noteModelCandidates = [GEMINI_MODEL];
+      const noteModelCandidates = [geminiModel()];
 
       for (const modelName of noteModelCandidates) {
         try {
