@@ -1,4 +1,9 @@
 import React, { createContext, useContext, useEffect, useState, useMemo } from "react";
+import {
+  getSupabase,
+  isSupabaseConfigured,
+  supabaseErrorMessage,
+} from "@/services/study/supabaseClient";
 
 export interface User {
   id: string;
@@ -21,11 +26,52 @@ const AUTH_STORAGE_KEY = "study_buddy_current_user";
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+interface SupabaseUserLike {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, unknown> | null;
+}
+
+/** Maps a Supabase auth user onto the app's local User shape. */
+function fromSupabaseUser(u: SupabaseUserLike): User {
+  const meta = u.user_metadata || {};
+  const name =
+    (typeof meta.full_name === "string" && meta.full_name) ||
+    (typeof meta.name === "string" && meta.name) ||
+    (typeof meta.display_name === "string" && meta.display_name) ||
+    (u.email ? u.email.split("@")[0] : "") ||
+    "Student";
+  const avatar =
+    (typeof meta.picture === "string" && meta.picture) ||
+    (typeof meta.avatar_url === "string" && meta.avatar_url) ||
+    undefined;
+  return {
+    id: u.id,
+    name,
+    ...(u.email ? { email: u.email } : {}),
+    ...(avatar ? { avatar } : {}),
+    isAnonymous: false,
+  };
+}
+
+function persistUser(user: User | null): void {
+  try {
+    if (user) {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  } catch {
+    // storage may be unavailable — the in-memory user still works
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Local cache first (guest mode + last known signed-in profile)…
     try {
       const stored = localStorage.getItem(AUTH_STORAGE_KEY);
       if (stored) {
@@ -33,9 +79,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (e) {
       console.warn("Failed to load user auth:", e);
-    } finally {
-      setIsLoading(false);
     }
+
+    // …then the real Supabase session, which wins when it exists.
+    const supabase = getSupabase();
+    if (!supabase) {
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const applySession = (session: { user?: SupabaseUserLike } | null) => {
+      if (cancelled) return;
+      if (session?.user) {
+        const mapped = fromSupabaseUser(session.user);
+        setUser(mapped);
+        persistUser(mapped);
+      }
+      setIsLoading(false);
+    };
+
+    supabase.auth
+      .getSession()
+      .then(({ data }) => applySession(data.session))
+      .catch((err) => {
+        console.warn("Supabase session check failed:", err);
+        if (!cancelled) setIsLoading(false);
+      });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      applySession(session);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (provider: string, params: Record<string, unknown> = {}) => {
@@ -48,9 +129,71 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isAnonymous: true,
         };
         setUser(guestUser);
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(guestUser));
+        persistUser(guestUser);
+      } else if (provider === "google") {
+        const supabase = getSupabase();
+        if (!supabase) {
+          throw new Error(
+            "Supabase nije podešen — dodaj VITE_SUPABASE_URL i VITE_SUPABASE_PUBLISHABLE_KEY u .env"
+          );
+        }
+        // Full OAuth round-trip: Google → Supabase → back to the dashboard.
+        // The session is then stored by supabase-js, so the student stays
+        // signed in and their messages / puškice live in the cloud.
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo:
+              typeof window !== "undefined"
+                ? `${window.location.origin}/dashboard`
+                : undefined,
+          },
+        });
+        if (error) throw new Error(supabaseErrorMessage(error));
       } else if (provider === "password") {
         const email = String(params.email || "");
+        const password = String(params.password || "");
+        const flow = String(params.flow || "signIn");
+        const supabase = getSupabase();
+
+        if (supabase) {
+          if (flow === "signUp") {
+            const name = String(params.name || email.split("@")[0] || "Student");
+            const { data, error } = await supabase.auth.signUp({
+              email,
+              password,
+              options: { data: { display_name: name, full_name: name } },
+            });
+            if (error) throw new Error(supabaseErrorMessage(error));
+            if (data.user && data.user.identities?.length === 0) {
+              throw new Error("Nalog sa ovim emailom već postoji.");
+            }
+            if (!data.session) {
+              throw new Error(
+                "Poslali smo ti email za potvrdu — otvori link pa se prijavi ponovo."
+              );
+            }
+            if (data.user) {
+              const mapped = fromSupabaseUser(data.user);
+              setUser(mapped);
+              persistUser(mapped);
+            }
+          } else {
+            const { data, error } = await supabase.auth.signInWithPassword({
+              email,
+              password,
+            });
+            if (error) throw new Error(supabaseErrorMessage(error));
+            if (data.user) {
+              const mapped = fromSupabaseUser(data.user);
+              setUser(mapped);
+              persistUser(mapped);
+            }
+          }
+          return;
+        }
+
+        // No Supabase configured → keep the old local-only behaviour.
         const name = String(params.name || email.split("@")[0] || "Student");
         const authedUser: User = {
           id: `user-${Date.now()}`,
@@ -59,7 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           isAnonymous: false,
         };
         setUser(authedUser);
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authedUser));
+        persistUser(authedUser);
       } else if (provider === "email-otp") {
         const email = String(params.email || "");
         if (params.code) {
@@ -70,21 +213,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             isAnonymous: false,
           };
           setUser(authedUser);
-          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authedUser));
+          persistUser(authedUser);
         }
-      } else if (provider === "google") {
-        // Real Google Sign-In (Google Identity Services) profile, decoded in
-        // googleAuthService. Falls back to a generic guest-like profile if the
-        // credential could not be decoded.
-        const authedUser: User = {
-          id: String(params.id || `google-${Date.now()}`),
-          name: String(params.name || "Google Student"),
-          ...(params.email ? { email: String(params.email) } : {}),
-          ...(params.avatar ? { avatar: String(params.avatar) } : {}),
-          isAnonymous: false,
-        };
-        setUser(authedUser);
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authedUser));
       }
     } finally {
       setIsLoading(false);
@@ -94,8 +224,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     setIsLoading(true);
     try {
+      const supabase = getSupabase();
+      if (supabase && isSupabaseConfigured) {
+        const { error } = await supabase.auth.signOut();
+        if (error) console.warn("Supabase sign-out:", supabaseErrorMessage(error));
+      }
       setUser(null);
-      localStorage.removeItem(AUTH_STORAGE_KEY);
+      persistUser(null);
     } finally {
       setIsLoading(false);
     }
@@ -110,7 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           avatar: updates.avatar,
           isAnonymous: false,
         };
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(fallbackUser));
+        persistUser(fallbackUser);
         if (typeof window !== "undefined") {
           window.dispatchEvent(
             new CustomEvent("study_buddy_profile_updated", { detail: fallbackUser })
@@ -123,7 +258,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ...(updates.name !== undefined ? { name: updates.name.trim() } : {}),
         ...(updates.avatar !== undefined ? { avatar: updates.avatar } : {}),
       };
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
+      persistUser(updatedUser);
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("study_buddy_profile_updated", { detail: updatedUser })

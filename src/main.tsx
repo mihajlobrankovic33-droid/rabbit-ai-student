@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router";
-import { ThemeProvider } from "next-themes";
+import { ThemeProvider } from "@/hooks/theme-provider";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/hooks/use-auth";
 import { registerSW } from "@/services/study/offlineService";
@@ -16,7 +16,7 @@ registerSW();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+    <ThemeProvider>
       <AuthProvider>
         <BrowserRouter>
           <Routes>

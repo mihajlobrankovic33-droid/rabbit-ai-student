@@ -36,6 +36,7 @@ import {
   isGoogleSignInConfigured,
   renderGoogleButton,
 } from "@/services/study/googleAuthService";
+import { isSupabaseConfigured } from "@/services/study/supabaseClient";
 
 interface AuthProps {
   redirectAfterAuth?: string;
@@ -124,14 +125,30 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
   };
 
-  // ---- Google Sign-In (Google Identity Services) -----------------------
+  // ---- Google Sign-In ----------------------------------------------------
+  // With Supabase configured the button runs the real Supabase OAuth flow
+  // (Google → Supabase → back to the dashboard), so the student ends up
+  // with a durable account instead of a throwaway local profile.
   const googleButtonRef = useRef<HTMLDivElement>(null);
   const signInRef = useRef(signIn);
   signInRef.current = signIn;
   const googleConfigured = isGoogleSignInConfigured();
+  const useSupabaseGoogle = isSupabaseConfigured && googleConfigured;
+
+  const handleGoogleSupabase = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      await signInRef.current("google");
+    } catch (err) {
+      console.error("Google (Supabase) sign-in error:", err);
+      setError(friendlyAuthError(err));
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!googleConfigured) return;
+    if (!googleConfigured || useSupabaseGoogle) return;
     if (step !== "login" && step !== "signup") return;
 
     let cancelled = false;
@@ -161,7 +178,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [googleConfigured, step]);
+  }, [googleConfigured, useSupabaseGoogle, step]);
 
   const handlePasswordSubmit = async (
     event: React.FormEvent<HTMLFormElement>,
@@ -403,7 +420,23 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
               <form onSubmit={handlePasswordSubmit}>
                 <CardContent className="space-y-3">
-                  {googleConfigured ? (
+                  {useSupabaseGoogle ? (
+                    <div className="space-y-1.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleGoogleSupabase}
+                        disabled={isLoading}
+                        className="h-11 w-full gap-2.5 rounded-xl border-border/80 bg-card font-semibold text-foreground"
+                      >
+                        <GoogleIcon className="h-4 w-4" />
+                        {isLoading ? "Opening Google..." : "Continue with Google"}
+                      </Button>
+                      <p className="text-center text-[10px] text-muted-foreground">
+                        Nastavi sigurno preko svog Google naloga
+                      </p>
+                    </div>
+                  ) : googleConfigured ? (
                     <div className="space-y-1.5">
                       {/* Official Google Sign-In button (rendered by Google Identity Services) */}
                       <div

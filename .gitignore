@@ -33,3 +33,6 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# Local runtime data (friend codes + messages)
+server-data/

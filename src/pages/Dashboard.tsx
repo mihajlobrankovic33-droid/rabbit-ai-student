@@ -1,57 +1,30 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ChatView } from "@/components/study/ChatView";
-import { ClassroomView } from "@/components/study/ClassroomView";
-import { GenerateForm } from "@/components/study/GenerateForm";
-import { GeneratedContent } from "@/components/study/GeneratedContent";
+import { PuskiceView } from "@/components/study/PuskiceView";
+import { MessagesView } from "@/components/study/MessagesView";
 import { RabbitLogo } from "@/components/study/RabbitLogo";
 import { SettingsModal } from "@/components/study/SettingsModal";
 import { HamburgerMenu } from "@/components/study/HamburgerMenu";
 import { UserProfileModal } from "@/components/study/UserProfileModal";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
-import { useStudyAI } from "@/hooks/use-study-ai";
 import { useI18n } from "@/services/study/i18n";
 import {
   deleteChatSession,
-  deleteNote,
   getChatSessions,
-  getNotes,
   saveChatSession,
-  saveNote,
 } from "@/services/study/notesService";
 import { getSelectedAIProvider } from "@/services/study/aiService";
-import type { ChatMessage, ChatSession, Note, StudyContent } from "@/types/study";
-import {
-  Cpu,
-  GraduationCap,
-  Loader2,
-  Menu,
-  MessageSquare,
-  Sparkles,
-  Volume2,
-  VolumeX,
-} from "lucide-react";
+import type { ChatMessage, ChatSession } from "@/types/study";
+import { Cpu, Menu, MessageSquare, MessagesSquare, NotebookPen } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import {
-  useTTSPlayback,
-  playSpeech,
-  cleanSpokenText,
-} from "@/services/ttsService";
-
-function makeId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
 
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { generateNotes } = useStudyAI();
   const { t } = useI18n();
 
-  const [activeView, setActiveView] = useState<"chat" | "classroom" | "notes">("chat");
+  const [activeView, setActiveView] = useState<"chat" | "puskice" | "messages">("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hamburgerOpen, setHamburgerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -64,87 +37,16 @@ export default function Dashboard() {
   // AI Provider info
   const [providerInfo, setProviderInfo] = useState({ provider: "builtin_offline", model: "" });
 
-  // Notes state - scoped to active student
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [currentContent, setCurrentContent] = useState<StudyContent | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isSaved, setIsSaved] = useState(false);
-  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
-  const [currentTitle, setCurrentTitle] = useState("");
-  const [currentTopic, setCurrentTopic] = useState("");
-
   // Chat state - scoped to active student
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [chatKey, setChatKey] = useState(`chat-${Date.now()}`);
   const [initialMessages, setInitialMessages] = useState<ChatMessage[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  // ElevenLabs TTS audio playback service state
-  const {
-    isPlaying: isAudioPlaying,
-    isLoading: isAudioLoading,
-    currentTitle: audioTitle,
-    source: audioSource,
-    stop: stopAudio,
-  } = useTTSPlayback();
-
   // Load chat sessions and notes strictly for the logged-in student
   const currentUserId = user?.id || "default_student";
 
-  const handlePlayResponse = useCallback(
-    async (contentToPlay?: StudyContent | null, customTitle?: string) => {
-      const target = contentToPlay || currentContent;
-      if (!target) {
-        toast.info("Nema učitane lekcije za slušanje.");
-        return;
-      }
-
-      const title = customTitle || target.title || "Lekcija";
-
-      // Toggle stop if already playing this response
-      if (isAudioPlaying && audioTitle === title) {
-        stopAudio();
-        toast.info("Audio reprodukcija zaustavljena.");
-        return;
-      }
-
-      const safePoints = Array.isArray(target.keyPoints) ? target.keyPoints : [];
-      const pointsSpeech =
-        safePoints.length > 0
-          ? `Glavne teze: ${safePoints.map((p, idx) => `Tačka ${idx + 1}: ${p}`).join(". ")}`
-          : "";
-      const summarySpeech = target.summary ? `Rezime: ${target.summary}` : "";
-      const fullNotesSpeech = target.fullNotes
-        ? `Detaljnije beleške: ${target.fullNotes.slice(0, 1500)}`
-        : "";
-
-      const spokenText = cleanSpokenText(
-        `Lekcija: ${title}. ${summarySpeech}. ${pointsSpeech}. ${fullNotesSpeech}`
-      );
-
-      toast.info(`Pokrećem ElevenLabs govor: "${title}"... 🎙️`);
-
-      const res = await playSpeech(spokenText, {
-        title,
-        languageCode: "sr",
-        onEnd: () => {
-          toast.success(`Završeno slušanje lekcije: "${title}"`);
-        },
-        onError: (err) => {
-          console.warn("TTS Error in Dashboard:", err);
-          toast.error("Greška pri reprodukciji odgovora.");
-        },
-      });
-
-      if (!res.success) {
-        toast.error("Nije moguće pokrenuti reprodukciju.");
-      }
-    },
-    [currentContent, isAudioPlaying, audioTitle, stopAudio]
-  );
-
   useEffect(() => {
-    setNotes(getNotes(currentUserId));
     setSessions(getChatSessions(currentUserId));
 
     const updateProvider = () => {
@@ -201,110 +103,7 @@ export default function Dashboard() {
     setTimerSeconds(timerMode === "focus" ? 25 * 60 : 5 * 60);
   }, [timerMode]);
 
-  const refreshNotes = useCallback(() => setNotes(getNotes(currentUserId)), [currentUserId]);
   const refreshSessions = useCallback(() => setSessions(getChatSessions(currentUserId)), [currentUserId]);
-
-  const handleGenerate = useCallback(
-    async (title: string, topic: string) => {
-      setIsGenerating(true);
-      setIsSaved(false);
-      setActiveNoteId(null);
-      setCurrentTitle(title);
-      setCurrentTopic(topic);
-
-      try {
-        const raw = await generateNotes(title, topic);
-        const rawObj = raw as unknown as Record<string, unknown>;
-        const inner = (
-          rawObj.content && typeof rawObj.content === "object"
-            ? rawObj.content
-            : rawObj
-        ) as Record<string, unknown>;
-
-        const safeKeyPoints = Array.isArray(inner.keyPoints)
-          ? (inner.keyPoints as unknown[]).map(String)
-          : typeof inner.keyPoints === "string"
-          ? [inner.keyPoints]
-          : ["Ključni koncepti i definicije", "Analiza korak po korak", "Praktična primena i saveti"];
-
-        const normalized: StudyContent = {
-          title: typeof inner.title === "string" ? inner.title : (title || "Study Notes"),
-          keyPoints: safeKeyPoints,
-          summary: typeof inner.summary === "string" ? inner.summary : (topic || title),
-          fullNotes: typeof inner.fullNotes === "string" ? inner.fullNotes : "",
-        };
-        setCurrentContent(normalized);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Neuspešno generisanje";
-        toast.error(msg);
-      } finally {
-        setIsGenerating(false);
-      }
-    },
-    [generateNotes]
-  );
-
-  const handleSave = useCallback(() => {
-    if (!currentContent) return;
-
-    const noteToSave: Note = {
-      id: activeNoteId ?? makeId(),
-      title: currentTitle || "Beleške bez naslova",
-      topic: currentTopic,
-      content: currentContent,
-      userId: currentUserId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    saveNote(noteToSave, currentUserId);
-    setActiveNoteId(noteToSave.id);
-    setIsSaved(true);
-    refreshNotes();
-    toast.success("Beleške uspešno sačuvane u biblioteku!");
-  }, [activeNoteId, currentContent, currentTitle, currentTopic, currentUserId, refreshNotes]);
-
-  const handleSelectNote = useCallback((note: Note) => {
-    setActiveNoteId(note.id);
-    setCurrentTitle(note.title);
-    setCurrentTopic(note.topic);
-    const contentObj = note.content as unknown as Record<string, unknown>;
-    const inner = (
-      contentObj && typeof contentObj.content === "object"
-        ? contentObj.content
-        : contentObj
-    ) as Record<string, unknown>;
-
-    const safeKeyPoints = Array.isArray(inner?.keyPoints)
-      ? (inner.keyPoints as unknown[]).map(String)
-      : typeof inner?.keyPoints === "string"
-      ? [inner.keyPoints]
-      : [];
-
-    const normalized: StudyContent = {
-      title: typeof inner?.title === "string" ? inner.title : (note.title || "Beleške"),
-      keyPoints: safeKeyPoints,
-      summary: typeof inner?.summary === "string" ? inner.summary : "",
-      fullNotes: typeof inner?.fullNotes === "string" ? inner.fullNotes : "",
-    };
-    setCurrentContent(normalized);
-    setIsSaved(true);
-    setActiveView("notes");
-  }, []);
-
-  const handleDeleteNote = useCallback(
-    (id: string) => {
-      deleteNote(id, currentUserId);
-      refreshNotes();
-      if (activeNoteId === id) {
-        setActiveNoteId(null);
-        setCurrentContent(null);
-        setIsSaved(false);
-      }
-      toast("Beleška obrisana");
-    },
-    [activeNoteId, currentUserId, refreshNotes]
-  );
 
   const handleSaveSession = useCallback(
     (messages: ChatMessage[]) => {
@@ -359,7 +158,7 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={() => navigate("/")}
-              className="flex cursor-pointer items-center gap-2 shrink-0 group"
+              className="flex min-h-[40px] min-w-[40px] cursor-pointer items-center justify-center gap-2 shrink-0 group"
             >
               <RabbitLogo size="sm" />
               <span className="hidden md:inline-block text-base font-extrabold tracking-tight text-foreground group-hover:text-primary transition-colors">
@@ -369,7 +168,7 @@ export default function Dashboard() {
 
             <div className="h-6 w-px bg-border/80 hidden sm:block" />
 
-            {/* Top Navigation Buttons: Chat, Učionica, Notes, and Market — hidden on mobile, shown on desktop */}
+            {/* Top Navigation Button: Chat — hidden on mobile, shown on desktop */}
             <div className="hidden md:flex items-center gap-1 rounded-2xl bg-muted/60 p-1 border border-border/60 shadow-2xs">
               <button
                 type="button"
@@ -386,29 +185,28 @@ export default function Dashboard() {
 
               <button
                 type="button"
-                onClick={() => setActiveView("classroom")}
+                onClick={() => setActiveView("puskice")}
                 className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-extrabold transition-all ${
-                  activeView === "classroom"
+                  activeView === "puskice"
                     ? "bg-primary text-primary-foreground shadow-xs"
                     : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                 }`}
-                title="Slatki životinjski nastavnici te ispituju pred tablom"
               >
-                <span className="text-xs">🐾</span>
-                <span>Učionica</span>
+                <NotebookPen className="h-3.5 w-3.5" />
+                <span>Puškice</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => setActiveView("notes")}
+                onClick={() => setActiveView("messages")}
                 className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-extrabold transition-all ${
-                  activeView === "notes"
+                  activeView === "messages"
                     ? "bg-primary text-primary-foreground shadow-xs"
                     : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                 }`}
               >
-                <GraduationCap className="h-3.5 w-3.5" />
-                <span>Notes</span>
+                <MessagesSquare className="h-3.5 w-3.5" />
+                <span>{t("messagesTab")}</span>
               </button>
             </div>
           </div>
@@ -430,7 +228,7 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={() => setHamburgerOpen(true)}
-              className="flex cursor-pointer items-center gap-2 rounded-2xl border border-border/80 bg-card px-3.5 py-2 text-xs font-extrabold text-foreground shadow-2xs transition-all hover:border-primary/50 hover:bg-primary/10 hover:text-primary active:scale-95"
+              className="flex min-h-[40px] cursor-pointer items-center gap-2 rounded-2xl border border-border/80 bg-card px-3.5 py-2 text-xs font-extrabold text-foreground shadow-2xs transition-all hover:border-primary/50 hover:bg-primary/10 hover:text-primary active:scale-95"
               title="Meni (Istorija, Fokus tajmer, Offline, Teme, Jezik, Odjava)"
             >
               <Menu className="h-4 w-4 text-primary" />
@@ -456,57 +254,15 @@ export default function Dashboard() {
               onSaveSession={handleSaveSession}
               onOpenSettings={() => setSettingsOpen(true)}
               onOpenHamburger={() => setHamburgerOpen(true)}
-              onSwitchToClassroom={() => setActiveView("classroom")}
             />
           </div>
         )}
+        {/* View 2: Puškice — AI reads images / PDF and makes short cheat sheets */}
+        {activeView === "puskice" && <PuskiceView userId={currentUserId} />}
 
-        {/* View 1.5: Animal Teacher Interactive Classroom (Oral Examination) */}
-        {activeView === "classroom" && (
-          <div className="animate-in fade-in duration-300">
-            <ClassroomView
-              onOpenNotes={() => setActiveView("notes")}
-              onOpenChat={(prompt) => {
-                if (prompt) {
-                  handleNewChat();
-                }
-                setActiveView("chat");
-              }}
-            />
-          </div>
-        )}
-
-        {/* View 2: Notes Generator Studio */}
-        {activeView === "notes" && (
-          <div className="grid gap-6 lg:grid-cols-12 animate-in fade-in duration-300">
-            <div className="space-y-5 lg:col-span-5">
-              <section className="rounded-3xl border border-border/80 bg-card p-4 sm:p-6 shadow-md">
-                <div className="mb-4 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      Generiši Nove Beleške
-                    </h2>
-                  </div>
-                </div>
-                <GenerateForm onGenerate={handleGenerate} isLoading={isGenerating} />
-              </section>
-            </div>
-
-            <div className="lg:col-span-7">
-              <section className="min-h-[420px] sm:min-h-[580px] rounded-3xl border border-border/80 bg-card p-4 sm:p-6 shadow-md">
-                <GeneratedContent
-                  content={currentContent}
-                  isGenerating={isGenerating}
-                  onSave={handleSave}
-                  saved={isSaved}
-                  onPlayResponse={handlePlayResponse}
-                  isPlayingResponse={isAudioPlaying && (audioTitle === (currentContent?.title || "Lekcija"))}
-                  isLoadingAudio={isAudioLoading}
-                />
-              </section>
-            </div>
-          </div>
+        {/* View 3: Messages — friends via 6-char codes */}
+        {activeView === "messages" && (
+          <MessagesView userId={currentUserId} userName={user?.name} />
         )}
       </main>
 
@@ -528,28 +284,32 @@ export default function Dashboard() {
 
           <button
             type="button"
-            onClick={() => setActiveView("classroom")}
+            onClick={() => setActiveView("puskice")}
             className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
-              activeView === "classroom"
+              activeView === "puskice"
                 ? "text-primary font-bold"
                 : "text-muted-foreground hover:text-foreground font-medium"
             }`}
           >
-            <span className={`text-lg leading-none ${activeView === "classroom" ? "scale-110" : ""}`}>🐾</span>
-            <span className="text-[10px] mt-0.5">Učionica</span>
+            <NotebookPen
+              className={`h-5 w-5 ${activeView === "puskice" ? "scale-110" : ""}`}
+            />
+            <span className="text-[10px] mt-1">Puškice</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveView("notes")}
+            onClick={() => setActiveView("messages")}
             className={`flex flex-col items-center justify-center flex-1 py-1 text-center transition-colors min-h-[44px] ${
-              activeView === "notes"
+              activeView === "messages"
                 ? "text-primary font-bold"
                 : "text-muted-foreground hover:text-foreground font-medium"
             }`}
           >
-            <GraduationCap className={`h-5 w-5 ${activeView === "notes" ? "scale-110" : ""}`} />
-            <span className="text-[10px] mt-1">Studio</span>
+            <MessagesSquare
+              className={`h-5 w-5 ${activeView === "messages" ? "scale-110" : ""}`}
+            />
+            <span className="text-[10px] mt-1">{t("messagesTab")}</span>
           </button>
 
           <button
@@ -581,11 +341,6 @@ export default function Dashboard() {
         onSelectSession={handleSelectSession}
         onDeleteSession={handleDeleteSession}
         onNewChat={handleNewChat}
-        notes={notes}
-        onSelectNote={handleSelectNote}
-        onDeleteNote={handleDeleteNote}
-        onOpenNotesTab={() => setActiveView("notes")}
-        onOpenClassroomTab={() => setActiveView("classroom")}
         timerSeconds={timerSeconds}
         timerActive={timerActive}
         timerMode={timerMode}
@@ -601,67 +356,6 @@ export default function Dashboard() {
         open={profileOpen}
         onOpenChange={setProfileOpen}
       />
-
-      {/* ElevenLabs Response Audio Player Bar */}
-      {(isAudioPlaying || isAudioLoading) && (
-        <aside
-          aria-label="ElevenLabs Audio Response Player"
-          className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[94%] max-w-lg animate-in slide-in-from-bottom-5 duration-300"
-        >
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-primary/40 bg-card/95 backdrop-blur-md px-4 py-3 shadow-xl shadow-primary/15">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
-                {isAudioLoading ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                ) : (
-                  <Volume2 className="h-5 w-5 text-primary animate-pulse" />
-                )}
-                {isAudioPlaying && (
-                  <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                  </span>
-                )}
-              </div>
-
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
-                    {audioSource === "elevenlabs" ? "ElevenLabs AI Glas" : "Glas Odgovora"}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">• Slušanje</span>
-                </div>
-                <p className="text-xs font-bold text-foreground truncate">
-                  {audioTitle || "AI Odgovor"}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Animated Sound Waves */}
-              {isAudioPlaying && (
-                <div className="hidden sm:flex items-center gap-0.5 h-4 px-1.5">
-                  <span className="w-1 bg-primary rounded-full animate-bounce [animation-delay:0ms] h-3" />
-                  <span className="w-1 bg-primary rounded-full animate-bounce [animation-delay:150ms] h-5" />
-                  <span className="w-1 bg-primary rounded-full animate-bounce [animation-delay:300ms] h-2" />
-                  <span className="w-1 bg-primary rounded-full animate-bounce [animation-delay:75ms] h-4" />
-                </div>
-              )}
-
-              <Button
-                type="button"
-                size="sm"
-                variant="destructive"
-                onClick={stopAudio}
-                className="h-8 rounded-xl px-3 text-xs font-bold gap-1.5 shadow-xs"
-              >
-                <VolumeX className="h-3.5 w-3.5" />
-                <span>Zaustavi</span>
-              </Button>
-            </div>
-          </div>
-        </aside>
-      )}
     </div>
   );
 }

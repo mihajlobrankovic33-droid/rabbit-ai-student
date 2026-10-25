@@ -4,11 +4,6 @@ import type {
   ClassroomSession,
   ClassroomTurn,
 } from "@/types/study";
-import {
-  speakText,
-  stopSpeaking as stopVoiceSpeaking,
-  LANGUAGE_LOCALE_MAP,
-} from "./voiceService";
 
 export const ANIMAL_TEACHERS: AnimalTeacher[] = [
   {
@@ -352,38 +347,6 @@ export function deleteClassroomSession(userId: string, sessionId: string): void 
   }
 }
 
-const TEACHER_ELEVEN_VOICE_MAP: Record<string, string> = {
-  fox: "ErXwobaYiN019PkySvjV", // Antoni (bistar, pametan lisac)
-  rabbit: "EXAVITQu4vr4xnSDxMaL", // Bella (energičan, veseo zec)
-  panda: "pNInz6obpgDQGcFmaJgB", // Adam (dubok, smiren mudar panda)
-  cat: "21m00Tcm4TlvDq8ikWAM", // Rachel (topla, pažljiva mačka)
-};
-
-// Web Speech & ElevenLabs Voice synthesis helper
-export function speakTeacherText(
-  text: string,
-  teacher: AnimalTeacher,
-  lang: string = "sr",
-  onEnd?: () => void
-): () => void {
-  const elevenVoiceId = TEACHER_ELEVEN_VOICE_MAP[teacher.id] || "21m00Tcm4TlvDq8ikWAM";
-
-  return speakText(text, {
-    lang,
-    pitch: teacher.voicePitch,
-    rate: teacher.voiceRate,
-    elevenVoiceId,
-    onEnd,
-    onError: () => {
-      onEnd?.();
-    },
-  });
-}
-
-export function stopSpeaking(): void {
-  stopVoiceSpeaking();
-}
-
 // Classroom API Calls
 export async function startClassroomSessionApi(params: {
   animalTeacher: AnimalTeacher;
@@ -600,71 +563,4 @@ export async function finishClassroomSessionApi(params: {
   }
 }
 
-// Browser Speech Recognition Support (Student voice answering)
-export interface SpeechRecognitionResultState {
-  transcript: string;
-  isListening: boolean;
-  isSupported: boolean;
-  error?: string;
-}
-
-export function createSpeechRecognizer(
-  lang: string = "sr-RS",
-  onResult: (text: string) => void,
-  onError?: (err: string) => void,
-  onEnd?: () => void
-): { start: () => void; stop: () => void; isSupported: boolean } {
-  if (typeof window === "undefined") {
-    return { start: () => {}, stop: () => {}, isSupported: false };
-  }
-
-  const SpeechRecognitionClass =
-    (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition ||
-    (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition;
-
-  if (!SpeechRecognitionClass) {
-    return { start: () => {}, stop: () => {}, isSupported: false };
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognition = new (SpeechRecognitionClass as any)();
-  recognition.continuous = false;
-  recognition.interimResults = false;
-  recognition.lang = LANGUAGE_LOCALE_MAP[lang] || lang;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  recognition.onresult = (event: any) => {
-    const transcript = event.results?.[0]?.[0]?.transcript || "";
-    if (transcript) {
-      onResult(transcript);
-    }
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  recognition.onerror = (event: any) => {
-    onError?.(event.error || "Speech recognition error");
-  };
-
-  recognition.onend = () => {
-    onEnd?.();
-  };
-
-  return {
-    start: () => {
-      try {
-        recognition.start();
-      } catch (e) {
-        console.warn("Speech recognition already running or error:", e);
-      }
-    },
-    stop: () => {
-      try {
-        recognition.stop();
-      } catch {
-        // ignore
-      }
-    },
-    isSupported: true,
-  };
-}
 

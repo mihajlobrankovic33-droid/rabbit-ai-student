@@ -1,13 +1,11 @@
 import React, { useState, useEffect } from "react";
 import {
-  BookOpen,
   Check,
   CheckCircle2,
   Cpu,
   Download,
   Flame,
   Globe,
-  GraduationCap,
   HardDriveDownload,
   LogOut,
   MessageSquare,
@@ -22,16 +20,14 @@ import {
   Laptop,
   Timer,
   Trash2,
-  Volume2,
   Wifi,
   WifiOff,
   X,
   Edit3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { VoicePresetDropdown } from "@/components/study/VoicePresetDropdown";
 import { useAuth } from "@/hooks/use-auth";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/hooks/use-theme";
 import { useNavigate } from "react-router";
 import {
   COLOR_THEMES,
@@ -49,7 +45,7 @@ import {
   isAppLocallyCached,
 } from "@/services/study/offlineService";
 import { getSelectedAIProvider } from "@/services/study/aiService";
-import type { ChatSession, Note } from "@/types/study";
+import type { ChatSession } from "@/types/study";
 import { toast } from "sonner";
 
 interface HamburgerMenuProps {
@@ -62,12 +58,6 @@ interface HamburgerMenuProps {
   onSelectSession?: (session: ChatSession) => void;
   onDeleteSession?: (id: string) => void;
   onNewChat?: () => void;
-  // Notes & Library
-  notes?: Note[];
-  onSelectNote?: (note: Note) => void;
-  onDeleteNote?: (id: string) => void;
-  onOpenNotesTab?: () => void;
-  onOpenClassroomTab?: () => void;
   // Focus Timer
   timerSeconds?: number;
   timerActive?: boolean;
@@ -87,11 +77,6 @@ export function HamburgerMenu({
   onSelectSession,
   onDeleteSession,
   onNewChat,
-  notes = [],
-  onSelectNote,
-  onDeleteNote,
-  onOpenNotesTab,
-  onOpenClassroomTab,
   timerSeconds = 25 * 60,
   timerActive = false,
   timerMode = "focus",
@@ -319,90 +304,6 @@ export function HamburgerMenu({
             </div>
           </section>
 
-          {/* 3. SAVED NOTES & LIBRARY BANNER (Moved into hamburger bar) */}
-          <section className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <BookOpen className="h-4 w-4 text-primary" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                  {t("savedNotes")}
-                </h3>
-                <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                  {notes.length}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                {onOpenClassroomTab && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onOpenClassroomTab();
-                      onClose();
-                    }}
-                    className="flex cursor-pointer items-center gap-1 rounded-xl bg-card border border-border/70 px-2 py-1 text-xs font-bold text-foreground transition-all hover:bg-muted hover:text-primary"
-                    title="Učionica sa životinjskim nastavnicima"
-                  >
-                    <span>🐾</span>
-                    <span>Učionica</span>
-                  </button>
-                )}
-                {onOpenNotesTab && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onOpenNotesTab();
-                      onClose();
-                    }}
-                    className="flex cursor-pointer items-center gap-1 rounded-xl bg-card border border-border/70 px-2.5 py-1 text-xs font-bold text-foreground transition-all hover:bg-muted hover:text-primary"
-                  >
-                    <GraduationCap className="h-3.5 w-3.5 text-primary" />
-                    <span>Studio</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {notes.length > 0 && (
-              <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                {notes.slice(0, 5).map((n) => (
-                  <div
-                    key={n.id}
-                    className="group flex items-center justify-between rounded-xl border border-border/60 bg-card p-2 text-left text-xs transition-all hover:border-primary/40 hover:bg-muted/40"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelectNote?.(n);
-                        onClose();
-                      }}
-                      className="flex min-w-0 flex-1 cursor-pointer items-center justify-between pr-1"
-                    >
-                      <span className="truncate font-semibold text-[11px] text-foreground">
-                        {n.title}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
-                        {new Date(n.createdAt).toLocaleDateString()}
-                      </span>
-                    </button>
-                    {onDeleteNote && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteNote(n.id);
-                        }}
-                        title="Obriši belešku"
-                        className="cursor-pointer rounded-lg p-1.5 text-muted-foreground transition-all hover:bg-destructive/15 hover:text-destructive hover:scale-110 ml-1"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
           {/* 4. Language Switcher (Serbian, English, and all others) */}
           <section className="space-y-2.5 rounded-2xl border border-border/70 bg-muted/20 p-4">
             <div className="flex items-center justify-between">
@@ -442,28 +343,7 @@ export function HamburgerMenu({
             </div>
           </section>
 
-          {/* 5. ElevenLabs Voice Presets for Study Sessions */}
-          <section className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Volume2 className="h-4 w-4 text-primary" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                  ElevenLabs Glas za Učenje
-                </h3>
-              </div>
-              <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                HD Naracija
-              </span>
-            </div>
-
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Izaberi glas za svoje studijske sesije i čitanje lekcija (npr. Antoni, Rachel, Adam ili Bella):
-            </p>
-
-            <VoicePresetDropdown id="hamburger-voice-preset-dropdown" />
-          </section>
-
-          {/* 6. Theme & Appearance (Mode + Color Palettes) */}
+          {/* Theme & Appearance (Mode + Color Palettes) */}
           <section className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
             <div className="flex items-center gap-2">
               <Palette className="h-4 w-4 text-primary" />

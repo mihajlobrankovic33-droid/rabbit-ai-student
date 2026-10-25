@@ -3,8 +3,6 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
-import { EdgeTTS } from "node-edge-tts";
 
 // Load .env for the Node process (tsx/dev + prod) so GEMINI_API_KEY / WOLFRAM_APPID work
 function loadEnvFile(): void {
@@ -53,7 +51,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: "10mb" }));
+  // 32mb: the Puskice endpoint receives base64 PDFs / image batches
+  app.use(express.json({ limit: "32mb" }));
 
   // Lazy Gemini client helper
   let genAIClient: GoogleGenAI | null = null;
@@ -90,7 +89,6 @@ async function startServer() {
       model: GEMINI_MODEL,
       hasGeminiKey: Boolean(getGeminiApiKey()),
       hasWolframKey: Boolean(process.env.WOLFRAM_APPID?.trim()),
-      hasElevenLabsKey: Boolean(process.env.ELEVENLABS_API_KEY),
     });
   });
 
@@ -260,582 +258,6 @@ async function startServer() {
       : new Error("Gemini model nije vratio odgovor.");
   }
 
-  // Curated ElevenLabs voices
-  const CURATED_ELEVENLABS_VOICES = [
-    {
-      id: "21m00Tcm4TlvDq8ikWAM",
-      name: "Rachel",
-      gender: "female",
-      traits: "Miran, topao, jasan glas nastavnice",
-      persona: "PreporuÄŤeno za zeca Lolu i strpljivo uÄŤenje",
-    },
-    {
-      id: "pNInz6obpgDQGcFmaJgB",
-      name: "Adam",
-      gender: "male",
-      traits: "Dubok, autoritativan, mudar glas",
-      persona: "PreporuÄŤeno za pandu Baoa i predavanja",
-    },
-    {
-      id: "ErXwobaYiN019PkySvjV",
-      name: "Antoni",
-      gender: "male",
-      traits: "Bistar, energiÄŤan, precizno artikulisan",
-      persona: "PreporuÄŤeno za lisca Feliksa i kvizove",
-    },
-    {
-      id: "EXAVITQu4vr4xnSDxMaL",
-      name: "Bella",
-      gender: "female",
-      traits: "IzraĹľajna, dinamiÄŤna, motiviĹˇuÄ‡a",
-      persona: "PreporuÄŤeno za maÄŤku Micu i dijalog",
-    },
-    {
-      id: "TxGEqnHWrfWFTfGW9XjX",
-      name: "Josh",
-      gender: "male",
-      traits: "Prirodan, prijateljski edukator",
-      persona: "OdliÄŤan za detaljna objaĹˇnjenja",
-    },
-    {
-      id: "MF3mGyEYCl7XYWbV9V6O",
-      name: "Elli",
-      gender: "female",
-      traits: "NeĹľna, vedra, kristalno jasna",
-      persona: "OdliÄŤna za decu i lakĹˇe gradivo",
-    },
-    {
-      id: "VR6AewLTigWG4xSOukaG",
-      name: "Arnold",
-      gender: "male",
-      traits: "Fokusiran, jasan govor bez oklevanja",
-      persona: "Idealan za definicije i formule",
-    },
-    {
-      id: "NOpBlnGInO9m6vDvFkFC",
-      name: "Zephyros (Eldoria Storyteller)",
-      gender: "male",
-      traits: "Mudar, ekspresivan, podrĹľava v3 audio tagove i emocije",
-      persona: "PreporuÄŤeno za priÄŤe, v3 ekspresije i slikovita objaĹˇnjenja",
-    },
-    {
-      id: "JBFqnCBsd6RMkjVDRZzb",
-      name: "George (Topao & Izuzetno Stabilan)",
-      gender: "male",
-      traits: "Topao, smiren narator, vrhunska stabilnost sa prirodnim emocijama",
-      persona: "PreporuÄŤeno za stabilan govor sa emocijama i lekcije",
-    },
-    {
-      id: "cgSgspJ2msm6clMCkdW9",
-      name: "Jessica (Ekspresivna & Stabilna)",
-      gender: "female",
-      traits: "Jasna, vedra, izraĹľajna dikcija sa Ĺľivom modulacijom",
-      persona: "OdliÄŤna za konverzaciju, pitanja i dinamiÄŤno voÄ‘enje",
-    },
-  ];
-
-  // List available TTS options
-  app.get("/api/tts/voices", (_req, res) => {
-    const envKey = (process.env.ELEVENLABS_API_KEY || "").trim().replace(/^["']|["']$/g, "");
-    const isServerKeyAnId = Boolean(envKey && !envKey.startsWith("sk_"));
-    const hasElevenLabsKey = Boolean(envKey && envKey.startsWith("sk_"));
-
-    res.json({
-      hasElevenLabsKey,
-      isServerKeyAnId,
-      serverKeyLength: envKey.length,
-      voices: CURATED_ELEVENLABS_VOICES,
-      defaultModel: "eleven_v3",
-      availableModels: ["eleven_v3", "eleven_multilingual_v2"],
-    });
-  });
-
-  // Validate ElevenLabs API Key endpoint
-  app.post("/api/tts/validate-key", async (req, res) => {
-    try {
-      const headerKey = typeof req.headers["x-elevenlabs-key"] === "string" ? req.headers["x-elevenlabs-key"].trim() : "";
-      const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
-      const rawKey = bodyKey || headerKey || process.env.ELEVENLABS_API_KEY || "";
-      const apiKey = rawKey.trim().replace(/^["']|["']$/g, "");
-
-      if (!apiKey) {
-        res.status(400).json({ valid: false, error: "Nije unet ElevenLabs API kljuÄŤ." });
-        return;
-      }
-
-      // Check if user accidentally pasted the Key ID instead of the secret key
-      if (!apiKey.startsWith("sk_")) {
-        res.status(400).json({
-          valid: false,
-          error: "Uneli ste ID kljuÄŤa (Key ID) a ne tajni API kljuÄŤ! ElevenLabs API kljuÄŤevi uvek poÄŤinju sa 'sk_'. U ElevenLabs kontrolnoj tabli kreirajte novi kljuÄŤ ili kopirajte tajnu vrednost koja poÄŤinje sa 'sk_'.",
-          isKeyId: true,
-        });
-        return;
-      }
-
-      const testRes = await fetch("https://api.elevenlabs.io/v1/user", {
-        headers: { "xi-api-key": apiKey },
-      });
-
-      if (!testRes.ok) {
-        const errText = await testRes.text();
-        let parsedMessage = errText;
-        let isKeyId = !apiKey.startsWith("sk_");
-        try {
-          const parsed = JSON.parse(errText);
-          if (parsed.detail?.message) parsedMessage = parsed.detail.message;
-          if (parsed.detail?.status === "api_key_id_used_as_api_key" || parsed.detail?.code === "invalid_api_key") {
-            isKeyId = true;
-          }
-        } catch (parseErr) {
-          console.warn("ElevenLabs test response parsing notice:", parseErr);
-        }
-
-        res.status(400).json({
-          valid: false,
-          error: isKeyId
-            ? "Uneli ste ID kljuÄŤa (Key ID) a ne tajni API kljuÄŤ! ElevenLabs API kljuÄŤ uvek poÄŤinje sa 'sk_'. U ElevenLabs kontrolnoj tabli kliknite na '+ Create Key' i kopirajte tajni kljuÄŤ koji poÄŤinje sa 'sk_'."
-            : `ElevenLabs greĹˇka: ${parsedMessage}`,
-          isKeyId,
-        });
-        return;
-      }
-
-      const userData = await testRes.json().catch(() => ({}));
-      const charCount = userData?.subscription?.character_count ?? 0;
-      const charLimit = userData?.subscription?.character_limit ?? 0;
-      const tier = userData?.subscription?.tier ?? "Free";
-
-      res.json({
-        valid: true,
-        tier,
-        characterCount: charCount,
-        characterLimit: charLimit,
-        remaining: Math.max(0, charLimit - charCount),
-      });
-    } catch (err) {
-      res.status(500).json({
-        valid: false,
-        error: err instanceof Error ? err.message : "GreĹˇka pri proveri kljuÄŤa",
-      });
-    }
-  });
-
-  // ------------------------------------------------------------------
-  // FREE neural text-to-speech (Microsoft Edge online TTS, no API key).
-  // Natural-sounding voices including Serbian (sr-RS), Croatian, Bosnian.
-  // This is the default voice for the app — ElevenLabs needs a paid plan.
-  // ------------------------------------------------------------------
-  const EDGE_VOICE_BY_LANG: Record<string, { male: string; female: string }> = {
-    sr: { male: "sr-RS-NicholasNeural", female: "sr-RS-SophieNeural" },
-    hr: { male: "hr-HR-SreckoNeural", female: "hr-HR-GabrijelaNeural" },
-    bs: { male: "bs-BA-GoranNeural", female: "bs-BA-VesnaNeural" },
-    en: { male: "en-US-AndrewNeural", female: "en-US-EmmaNeural" },
-    de: { male: "de-DE-ConradNeural", female: "de-DE-KatjaNeural" },
-    fr: { male: "fr-FR-RemyNeural", female: "fr-FR-DeniseNeural" },
-    es: { male: "es-ES-AlvaroNeural", female: "es-ES-ElviraNeural" },
-    it: { male: "it-IT-DiegoNeural", female: "it-IT-ElsaNeural" },
-    ru: { male: "ru-RU-DmitryNeural", female: "ru-RU-SvetlanaNeural" },
-    pt: { male: "pt-BR-AntonioNeural", female: "pt-BR-FranciscaNeural" },
-    tr: { male: "tr-TR-AhmetNeural", female: "tr-TR-EmelNeural" },
-  };
-
-  const edgeAudioCache = new Map<string, Buffer>();
-  const EDGE_CACHE_MAX_ENTRIES = 200;
-
-  /** ratio (1 = normal speed) -> "+10%" / "-15%" prosody value. */
-  function edgePercentFromRatio(ratio: unknown): string | undefined {
-    if (typeof ratio !== "number" || !isFinite(ratio) || ratio <= 0) return undefined;
-    const pct = Math.round((ratio - 1) * 100);
-    if (pct === 0) return undefined;
-    return `${pct > 0 ? "+" : ""}${pct}%`;
-  }
-
-  /** "+1.15" / 1.15 / "+15%" -> "+15%" (accepts what the client sends). */
-  function edgePercentFromValue(value: unknown, isPitch = false): string | undefined {
-    if (typeof value === "number" && isFinite(value)) {
-      if (isPitch) {
-        // Client pitch is a multiplier; map it to a modest Hz offset.
-        const hz = Math.round((value - 1) * 15);
-        return hz === 0 ? undefined : `${hz > 0 ? "+" : ""}${hz}Hz`;
-      }
-      return edgePercentFromRatio(value);
-    }
-    if (typeof value === "string" && value.trim()) {
-      const raw = value.trim();
-      if (/^[+-]?\d+(\.\d+)?%$/.test(raw)) {
-        const num = parseFloat(raw);
-        return `${num > 0 ? "+" : ""}${num}%`;
-      }
-      if (isPitch && /^[+-]?\d+(\.\d+)?Hz$/i.test(raw)) return raw;
-      const num = parseFloat(raw);
-      if (!isNaN(num)) {
-        if (isPitch) {
-          const hz = Math.round((num - 1) * 15);
-          return hz === 0 ? undefined : `${hz > 0 ? "+" : ""}${hz}Hz`;
-        }
-        return edgePercentFromRatio(num);
-      }
-    }
-    return undefined;
-  }
-
-  // Edge occasionally rate-limits (429) when we ask for several sentences fast.
-  // Serialize requests + retry with backoff so the free Serbian neural voice is
-  // actually used instead of falling back to a voice that mangles Serbian.
-  let edgeQueue: Promise<void> = Promise.resolve();
-  const EDGE_MAX_ATTEMPTS = 4;
-  const edgeSleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-  async function synthesizeEdge(
-    text: string,
-    voice: string,
-    locale: string,
-    rate?: string,
-    pitch?: string
-  ): Promise<Buffer> {
-    const run = async (): Promise<Buffer> => {
-      let lastErr: unknown;
-      for (let attempt = 1; attempt <= EDGE_MAX_ATTEMPTS; attempt++) {
-        try {
-          const tts = new EdgeTTS({
-            voice,
-            lang: locale,
-            rate: rate || "default",
-            pitch: pitch || "default",
-            timeout: 25000,
-          });
-          const chunks: Buffer[] = [];
-          for await (const chunk of tts.streamAudio(text)) {
-            if (Buffer.isBuffer(chunk) && chunk.length > 0) chunks.push(chunk);
-          }
-          const combined = Buffer.concat(chunks);
-          if (combined.length > 0) return combined;
-          lastErr = new Error("Edge returned empty audio");
-        } catch (e) {
-          lastErr = e;
-        }
-        if (attempt < EDGE_MAX_ATTEMPTS) {
-          await edgeSleep(350 * attempt + Math.random() * 250);
-        }
-      }
-      throw lastErr instanceof Error ? lastErr : new Error("Edge TTS failed");
-    };
-
-    // Chain onto the queue so requests go out one at a time.
-    const result = edgeQueue.then(run, run);
-    edgeQueue = result.then(
-      () => undefined,
-      () => undefined
-    );
-    return result;
-  }
-
-  function sendAudioWithRange(req: express.Request, res: express.Response, combined: Buffer): void {
-    const range = req.headers.range;
-    res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Content-Type", "audio/mpeg");
-    res.setHeader("Cache-Control", "public, max-age=86400");
-
-    if (range) {
-      const parts = range.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10) || 0;
-      const end = parts[1] ? parseInt(parts[1], 10) : combined.length - 1;
-      const chunksize = end - start + 1;
-      res.status(206);
-      res.setHeader("Content-Range", `bytes ${start}-${end}/${combined.length}`);
-      res.setHeader("Content-Length", chunksize);
-      res.send(combined.subarray(start, end + 1));
-    } else {
-      res.setHeader("Content-Length", combined.length);
-      res.send(combined);
-    }
-  }
-
-  app.post("/api/tts/edge", async (req, res) => {
-    try {
-      const { text, lang = "sr", gender = "male", voice, rate, pitch } = req.body || {};
-      const rawText = typeof text === "string" ? text : "";
-      const cleanText = rawText
-        .replace(/\[[^\]]{1,40}\]/g, " ")
-        .replace(/[*_#`>]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      if (!cleanText) {
-        res.status(400).json({ error: "Tekst je neophodan za sintezu govora." });
-        return;
-      }
-
-      const langKey = String(lang).slice(0, 2).toLowerCase();
-      const pair = EDGE_VOICE_BY_LANG[langKey] || EDGE_VOICE_BY_LANG.en;
-      const chosenVoice =
-        typeof voice === "string" && /^[a-z]{2}-[A-Z]{2,4}-[\w]+Neural$/i.test(voice.trim())
-          ? voice.trim()
-          : gender === "female"
-            ? pair.female
-            : pair.male;
-      const locale = chosenVoice.match(/^([a-z]{2}-[A-Za-z0-9]{2,4})-/)?.[1] || `${langKey}-US`;
-      const rateStr = edgePercentFromValue(rate);
-      const pitchStr = edgePercentFromValue(pitch, true);
-
-      const cacheKey = `${chosenVoice}|${rateStr || ""}|${pitchStr || ""}|${cleanText}`;
-      let audio = edgeAudioCache.get(cacheKey);
-
-      if (!audio) {
-        try {
-          audio = await synthesizeEdge(cleanText, chosenVoice, locale, rateStr, pitchStr);
-        } catch (edgeErr) {
-          console.warn(
-            `Edge TTS failed (${chosenVoice}):`,
-            edgeErr instanceof Error ? edgeErr.message : edgeErr
-          );
-          res.status(502).json({
-            error: "EDGE_TTS_ERROR",
-            message: edgeErr instanceof Error ? edgeErr.message : "Sinteza govora nije uspela.",
-          });
-          return;
-        }
-
-        if (!audio || audio.length === 0) {
-          res.status(502).json({ error: "EDGE_TTS_EMPTY" });
-          return;
-        }
-
-        edgeAudioCache.set(cacheKey, audio);
-        if (edgeAudioCache.size > EDGE_CACHE_MAX_ENTRIES) {
-          const oldest = edgeAudioCache.keys().next().value;
-          if (oldest !== undefined) edgeAudioCache.delete(oldest);
-        }
-      }
-
-      sendAudioWithRange(req, res, audio);
-    } catch (err) {
-      console.error("Edge TTS error:", err);
-      res.status(500).json({
-        error: "EDGE_TTS_ERROR",
-        message: err instanceof Error ? err.message : "Greška pri obradi govora.",
-      });
-    }
-  });
-
-  // Universal Natural Speech proxy endpoint (zero-config, high clarity fallback)
-  app.post("/api/tts/natural", async (req, res) => {
-    try {
-      const { text, lang = "sr" } = req.body;
-      const rawText = typeof text === "string" ? text : "";
-      // Strip any [whispers], [excitedly], etc. emotion tags so Google TTS doesn't attempt to spell them
-      const cleanText = rawText
-        .replace(/\[\s*(?:whispers|giggles|sarcastically|sighs|laughs|snickers|cries|shouts|yells|clears throat|pause|excitedly|curiously|gently|warmly|softly|calmly|proudly|thoughtfully|enthusiastically|cheerfully|dramatically|seriously|confidently|friendly|lovingly|nervously|relieved|happy|sad|excited|curious|[a-zA-Z]{3,20})\s*\]/gi, " ")
-        .replace(/\s{2,}/g, " ")
-        .trim();
-
-      if (!cleanText) {
-        res.status(400).json({ error: "Tekst je neophodan za sintezu govora." });
-        return;
-      }
-
-      const langCodeMap: Record<string, string> = {
-        sr: "sr",
-        hr: "hr",
-        bs: "bs",
-        en: "en",
-        de: "de",
-        fr: "fr",
-        es: "es",
-        it: "it",
-        ru: "ru",
-        pt: "pt",
-        tr: "tr",
-      };
-      const targetLang = langCodeMap[lang.slice(0, 2).toLowerCase()] || "sr";
-
-      // Split into chunks of max 180 characters by sentence / comma
-      const chunks: string[] = [];
-      const sentences = cleanText.match(/[^.!?,\n]+[.!?,\n]*|.+/g) || [cleanText];
-      let currentChunk = "";
-
-      for (const sentence of sentences) {
-        const trimmed = sentence.trim();
-        if (!trimmed) continue;
-        if ((currentChunk + " " + trimmed).trim().length <= 180) {
-          currentChunk = (currentChunk + " " + trimmed).trim();
-        } else {
-          if (currentChunk) chunks.push(currentChunk);
-          if (trimmed.length > 180) {
-            const words = trimmed.split(/\s+/);
-            let subChunk = "";
-            for (const word of words) {
-              if ((subChunk + " " + word).trim().length <= 180) {
-                subChunk = (subChunk + " " + word).trim();
-              } else {
-                if (subChunk) chunks.push(subChunk);
-                subChunk = word;
-              }
-            }
-            if (subChunk) currentChunk = subChunk;
-            else currentChunk = "";
-          } else {
-            currentChunk = trimmed;
-          }
-        }
-      }
-      if (currentChunk) chunks.push(currentChunk);
-
-      const buffers: Buffer[] = [];
-      for (const chunk of chunks.slice(0, 15)) {
-        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=${targetLang}&client=tw-ob`;
-        const ttsRes = await fetch(url, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          },
-        });
-        if (ttsRes.ok) {
-          const ab = await ttsRes.arrayBuffer();
-          buffers.push(Buffer.from(ab));
-        }
-      }
-
-      if (buffers.length === 0) {
-        res.status(500).json({ error: "Sinteza govora nije uspela." });
-        return;
-      }
-
-      const combined = Buffer.concat(buffers);
-      const range = req.headers.range;
-
-      res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader("Content-Type", "audio/mpeg");
-      res.setHeader("Cache-Control", "public, max-age=86400");
-
-      if (range) {
-        const parts = range.replace(/bytes=/, "").split("-");
-        const start = parseInt(parts[0], 10) || 0;
-        const end = parts[1] ? parseInt(parts[1], 10) : combined.length - 1;
-        const chunksize = end - start + 1;
-        res.status(206);
-        res.setHeader("Content-Range", `bytes ${start}-${end}/${combined.length}`);
-        res.setHeader("Content-Length", chunksize);
-        res.send(combined.subarray(start, end + 1));
-      } else {
-        res.setHeader("Content-Length", combined.length);
-        res.send(combined);
-      }
-    } catch (err) {
-      console.error("Natural TTS error:", err);
-      res.status(500).json({
-        error: "NATURAL_TTS_ERROR",
-        message: err instanceof Error ? err.message : "GreĹˇka pri obradi govora.",
-      });
-    }
-  });
-
-  // ElevenLabs Text-to-Speech proxy endpoint using official ElevenLabsClient SDK
-  app.post("/api/tts/elevenlabs", async (req, res) => {
-    try {
-      const headerKey = typeof req.headers["x-elevenlabs-key"] === "string" ? req.headers["x-elevenlabs-key"].trim() : "";
-      const bodyKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
-      const rawKey = headerKey || bodyKey || process.env.ELEVENLABS_API_KEY || "";
-      const apiKey = rawKey.trim().replace(/^["']|["']$/g, "");
-
-      if (!apiKey) {
-        res.status(400).json({
-          error: "ELEVENLABS_KEY_MISSING",
-          message: "ELEVENLABS_API_KEY nije podeĹˇen na serveru niti prosleÄ‘en u zahtevu.",
-        });
-        return;
-      }
-
-      // Proactive check: Did the user provide a Key ID instead of the secret key?
-      if (!apiKey.startsWith("sk_")) {
-        res.status(400).json({
-          error: "KEY_ID_USED",
-          message: "Uneli ste ID kljuÄŤa (Key ID) a ne tajni ElevenLabs API kljuÄŤ. ElevenLabs API kljuÄŤ mora poÄŤinjati sa 'sk_'. Otvorite ElevenLabs profil i kopirajte tajni kljuÄŤ koji poÄŤinje sa 'sk_'.",
-          isKeyId: true,
-        });
-        return;
-      }
-
-      const { text, voiceId, modelId, languageCode, voiceSettings: incomingVoiceSettings } = req.body;
-      const cleanText = (typeof text === "string" ? text : "").trim();
-      if (!cleanText) {
-        res.status(400).json({ error: "Tekst je neophodan za sintezu govora." });
-        return;
-      }
-
-      const targetVoice = voiceId || "NOpBlnGInO9m6vDvFkFC";
-      const targetModel = modelId || "eleven_v3";
-      const targetLanguageCode = typeof languageCode === "string" && languageCode.trim() ? languageCode.trim() : undefined;
-
-      // Calibration for stable voice with emotions:
-      // In ElevenLabs: stability around 0.45 - 0.50 maintains high acoustic consistency (no glitches or voice cracks)
-      // while allowing rich emotional expression, tonal inflections, and v3 audio tags ([whispers], [excitedly], etc.)
-      const stability = typeof incomingVoiceSettings?.stability === "number"
-        ? Math.min(Math.max(incomingVoiceSettings.stability, 0.0), 1.0)
-        : 0.50;
-      const similarityBoost = typeof incomingVoiceSettings?.similarityBoost === "number"
-        ? Math.min(Math.max(incomingVoiceSettings.similarityBoost, 0.0), 1.0)
-        : 0.75;
-      const style = typeof incomingVoiceSettings?.style === "number"
-        ? Math.min(Math.max(incomingVoiceSettings.style, 0.0), 1.0)
-        : 0.15;
-      const useSpeakerBoost = incomingVoiceSettings?.useSpeakerBoost !== false;
-
-      const elevenlabs = new ElevenLabsClient({ apiKey });
-
-      // Voice settings: v3 primarily modulates stability for expressive speech vs consistency
-      // v2 models support stability, similarityBoost, style, and useSpeakerBoost
-      const v3VoiceSettings = { stability };
-      const v2VoiceSettings = { stability, similarityBoost, style, useSpeakerBoost };
-
-      let audioStream: AsyncIterable<Uint8Array | Buffer>;
-      try {
-        audioStream = await elevenlabs.textToSpeech.convert(targetVoice, {
-          text: cleanText.slice(0, 4000),
-          modelId: targetModel,
-          languageCode: targetLanguageCode,
-          voiceSettings: targetModel === "eleven_v3" ? v3VoiceSettings : v2VoiceSettings,
-        }) as AsyncIterable<Uint8Array | Buffer>;
-      } catch (convertErr: unknown) {
-        // If eleven_v3 is not accessible or languageCode is unsupported, gracefully try eleven_multilingual_v2
-        if (targetModel !== "eleven_multilingual_v2") {
-          console.warn(`Fallback to eleven_multilingual_v2 for voice ${targetVoice}:`, convertErr instanceof Error ? convertErr.message : convertErr);
-          audioStream = await elevenlabs.textToSpeech.convert(targetVoice, {
-            text: cleanText.slice(0, 4000),
-            modelId: "eleven_multilingual_v2",
-            voiceSettings: v2VoiceSettings,
-          }) as AsyncIterable<Uint8Array | Buffer>;
-        } else {
-          throw convertErr;
-        }
-      }
-
-      const chunks: Buffer[] = [];
-      for await (const chunk of audioStream) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
-      const buffer = Buffer.concat(chunks);
-
-      res.setHeader("Content-Type", "audio/mpeg");
-      res.setHeader("Content-Length", buffer.length);
-      res.setHeader("Cache-Control", "public, max-age=3600");
-      res.send(buffer);
-    } catch (err: unknown) {
-      console.error("ElevenLabs TTS handler error:", err);
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const isKeyId = errMsg.includes("api_key_id_used_as_api_key") || errMsg.includes("only valid API keys can be used");
-      const errWithStatus = err as { statusCode?: number };
-      const status = typeof errWithStatus?.statusCode === "number" ? errWithStatus.statusCode : 500;
-      res.status(status).json({
-        error: isKeyId ? "KEY_ID_USED" : "ELEVENLABS_API_ERROR",
-        message: isKeyId
-          ? "Uneli ste ID kljuÄŤa (Key ID) a ne tajni API kljuÄŤ. ElevenLabs kljuÄŤ mora poÄŤinjati sa 'sk_'."
-          : `ElevenLabs greĹˇka (${status}): ${errMsg}`,
-        isKeyId,
-      });
-    }
-  });
-
   // ------------------------------------------------------------------
   // Wolfram Alpha: exact formulas, computations and final answers
   // Requires WOLFRAM_APPID in .env (free key from developer.wolframalpha.com)
@@ -863,7 +285,7 @@ async function startServer() {
       return true;
     }
     // digits glued to math operators, powers, roots or an equals sign
-    return /[0-9]\s*[+\-*/^=]/.test(text) || /[âšâ«â‘Ď€Â˛Âł]/.test(text);
+    return /[0-9]\s*[+\-*/^=]/.test(text) || /[√∫∑π²³]/.test(text);
   }
 
   interface WolframPod {
@@ -996,14 +418,14 @@ async function startServer() {
   function formatWolframMarkdown(result: WolframResult | null): string {
     if (!result || result.pods.length === 0) return "";
 
-    const lines: string[] = ["### đź§® Wolfram Alpha â€” proveren odgovor", ""];
+    const lines: string[] = ["### 🧮 Wolfram Alpha — proveren odgovor", ""];
 
     const answerPod = result.answer
       ? result.pods.find((p) => p.text === result.answer)
       : undefined;
 
     if (result.answer && answerPod) {
-      lines.push(`**âś… Odgovor / Answer:**`, "", "```", result.answer, "```", "");
+      lines.push(`**✅ Odgovor / Answer:**`, "", "```", result.answer, "```", "");
     }
 
     const detailPods = result.pods.filter((p) => p !== answerPod);
@@ -1096,7 +518,7 @@ async function startServer() {
         "2. LANGUAGE MATCHING: You MUST ALWAYS respond in the EXACT SAME LANGUAGE as the user's message (e.g. if the user writes in Serbian/Croatian/Bosnian, reply in natural, fluent Serbian/Croatian/Bosnian; if in English, reply in English; if in German, German; etc.).\n" +
         "3. STRUCTURE: Use clear, beautifully formatted Markdown with bold key terms, numbered steps, bullet points, intuitive real-world analogies, and a quick active recall check at the end to verify understanding.\n" +
         "4. FORMULAS: Render EVERY formula, equation, expression, matrix and mathematical notation in LaTeX so it displays correctly: inline math as $...$ (e.g. $E = mc^2$, $x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$) and standalone display math as $$...$$ on its own line. Never write raw ASCII math like a/b or sqrt(x) when LaTeX is possible. Use \\( \\) style ONLY if $ is ambiguous inside code.\n" +
-        "5. ANSWERS: For every concrete question, problem or calculation, finish with a clearly labeled final answer line in the student's language, e.g. **âś… Odgovor: ...** (or **âś… Answer: ...** in English), including units and the final value/formula. Show the full derivation BEFORE that line.\n" +
+        "5. ANSWERS: For every concrete question, problem or calculation, finish with a clearly labeled final answer line in the student's language, e.g. **✅ Odgovor: ...** (or **✅ Answer: ...** in English), including units and the final value/formula. Show the full derivation BEFORE that line.\n" +
         "6. PROBLEM SOLVING: When given a math, code, or science problem, break down the derivation and solve it completely.";
 
       if (animalTeacher && typeof animalTeacher === "object") {
@@ -1106,12 +528,12 @@ async function startServer() {
         systemInstruction =
           `You are ${teacherName} (${teacherRole}), an adorable, witty, inspiring animal schoolteacher in the student's classroom!\n` +
           `TEACHER PERSONA & CLASSROOM RULES:\n` +
-          `1. Speak warmly and authentically in character as this cute animal teacher (${animalTeacher.emoji || "đźľ"}).\n` +
+          `1. Speak warmly and authentically in character as this cute animal teacher (${animalTeacher.emoji || "🐾"}).\n` +
           `2. Your catchphrase: "${catchphrase}".\n` +
           `3. As a true teacher in class: Explain clearly, praise good effort, give constructive tips, and at the end of your message ALWAYS ask the student a thoughtful, engaging question to test what they understood (just like being called to the board in class)!\n` +
           `4. Keep the exact language of the student (Serbian/Croatian/Bosnian if they speak that language, English if English, etc.).\n` +
           `5. Deliver deep, accurate academic explanations without any dumbing down, paired with cute animal charm!\n` +
-          `6. Write every formula in LaTeX ($...$ inline, $$...$$ for display) and always end a concrete problem with a bold final answer line such as **âś… Odgovor: ...**.`;
+          `6. Write every formula in LaTeX ($...$ inline, $$...$$ for display) and always end a concrete problem with a bold final answer line such as **✅ Odgovor: ...**.`;
       }
 
       // Ask Wolfram Alpha in parallel for exact computations / formulas
@@ -1135,7 +557,7 @@ async function startServer() {
       const wolframAnswer = await wolframPromise;
       const wolframBlock = formatWolframMarkdown(wolframAnswer);
 
-      // Gemini unavailable (no key / quota / network) â†’ Wolfram can still answer
+      // Gemini unavailable (no key / quota / network) → Wolfram can still answer
       if (!responseText) {
         if (wolframBlock) {
           res.json({ reply: wolframBlock, source: "wolfram" });
@@ -1461,7 +883,7 @@ Return STRICT JSON matching this schema:
             finalVerdict: `ÄŚestitam! UspeĹˇno si zavrĹˇio/la ispitivanje pred tablom za temu "${topic}". Tvoji odgovori su bili jasni, logiÄŤni i sa puno razumevanja.`,
             keyStrengths: ["Definisanje kljuÄŤnih pojmova", "Povezivanje gradiva"],
             topicsToReview: ["UveĹľbati dodatne primere za maksimalnu sigurnost"],
-            diplomaPraise: `ÄŚista petica! ZasluĹľio/la si zvanje pravog malog struÄŤnjaka! đźľ`,
+            diplomaPraise: `ÄŚista petica! ZasluĹľio/la si zvanje pravog malog struÄŤnjaka! 🐾`,
           });
         }
         return;
@@ -1539,6 +961,397 @@ CRITICAL RULES:
       console.error("AI Notes error:", err);
       const errMsg = err instanceof Error ? err.message : "Internal Notes Generation Error";
       res.status(500).json({ error: errMsg });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // PUŠKICE (cheat sheets): AI reads uploaded images / PDF / text and
+  // distills it into short, precise, exam-ready notes.
+  //
+  // Two-stage flow (needed because up to 330 images never fit in one call):
+  //   1) POST /api/ai/puskice/batch  — digests one chunk of the material
+  //   2) POST /api/ai/puskice/final  — merges the digests into final puskice
+  //      and (for math/physics/chemistry) verifies formulas via Wolfram Alpha
+  // ------------------------------------------------------------------
+  const PUSKICE_SYSTEM =
+    "You are Study Buddy, an expert at condensing study material into compact exam cheat sheets (puškice).\n" +
+    "RULES:\n" +
+    "1. Respond in the SAME LANGUAGE as the subject name (Serbian by default).\n" +
+    "2. Keep ONLY exam-relevant content: definitions, laws, formulas, dates, mechanisms, units, exceptions, typical mistakes.\n" +
+    "3. Be extremely dense and short — no filler, no intros, no outros, no questions.\n" +
+    "4. Write EVERY formula, equation and expression in LaTeX: inline as $...$, standalone as $$...$$.\n" +
+    "5. Output plain Markdown only (headings, bullets, bold).";
+
+  app.post("/api/ai/puskice/batch", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const subject =
+        (typeof body.subject === "string" ? body.subject : "").trim() ||
+        "Opšte gradivo";
+      const kind =
+        body.kind === "pdf" ? "pdf" : body.kind === "text" ? "text" : "images";
+      const images: Array<{ data?: string; mimeType?: string }> = Array.isArray(
+        body.images
+      )
+        ? body.images
+        : [];
+      const pdf: { data?: string } =
+        body.pdf && typeof body.pdf === "object" ? body.pdf : {};
+      const text = typeof body.text === "string" ? body.text : "";
+      const part = Number.isFinite(body.part) ? Number(body.part) : 1;
+      const total = Number.isFinite(body.total) ? Number(body.total) : 1;
+
+      const parts: Array<Record<string, unknown>> = [];
+      if (kind === "images") {
+        for (const img of images) {
+          if (img?.data) {
+            parts.push({
+              inlineData: {
+                mimeType: img.mimeType || "image/jpeg",
+                data: img.data,
+              },
+            });
+          }
+        }
+      } else if (kind === "pdf") {
+        if (pdf?.data) {
+          parts.push({
+            inlineData: { mimeType: "application/pdf", data: pdf.data },
+          });
+        }
+      } else if (text.trim()) {
+        parts.push({ text: text });
+      }
+
+      if (parts.length === 0) {
+        res.status(400).json({ error: "Nema materijala za obradu." });
+        return;
+      }
+
+      parts.unshift({
+        text:
+          `SUBJECT / PREDMET: ${subject}\n` +
+          `This is part ${part} of ${total} of the uploaded material.\n\n` +
+          "Digest everything important from the attached content: " +
+          "definitions, formulas, laws, dates, key facts and typical exam questions. " +
+          "Be short and precise — this digest will be merged with other parts into final cheat sheets.",
+      });
+
+      const summary = await generateWithRetry({
+        contents: [{ role: "user", parts }],
+        systemInstruction: PUSKICE_SYSTEM,
+      });
+
+      res.json({ summary });
+    } catch (err: unknown) {
+      console.error("Puskice batch error:", err);
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Greška pri obradi fajla",
+      });
+    }
+  });
+
+  app.post("/api/ai/puskice/final", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const subject =
+        (typeof body.subject === "string" ? body.subject : "").trim() ||
+        "Opšte gradivo";
+      const digests: string[] = Array.isArray(body.parts)
+        ? body.parts
+            .filter((p: unknown): p is string => typeof p === "string")
+            .map((p: string) => p.trim())
+            .filter(Boolean)
+        : [];
+
+      if (digests.length === 0) {
+        res.status(400).json({ error: "Nema sadržaja za puskice." });
+        return;
+      }
+
+      const prompt =
+        `SUBJECT / PREDMET: ${subject}\n\n` +
+        `DIGESTS OF THE UPLOADED MATERIAL (${digests.length} parts):\n` +
+        digests
+          .map((d, i) => `--- PART ${i + 1} ---\n${d}`)
+          .join("\n\n") +
+        "\n\nTASK: Merge everything above into ONE final cheat sheet (puškice) for this subject.\n" +
+        "REQUIREMENTS:\n" +
+        "- Ultra short and precise — everything a student needs on ONE screen, nothing wasted.\n" +
+        "- Group into tiny sections with ## headings (Definicije, Formule, Ključno, Primeri... whichever fit).\n" +
+        "- Skip anything trivial; no repetition; no explanations of what you did.\n" +
+        "- ALL formulas in LaTeX ($...$ / $$...$$).\n" +
+        '- If the subject is math/physics/chemistry, also return 1-3 short ENGLISH Wolfram Alpha ' +
+        'queries (e.g. "quadratic formula", "law of cosines", "ideal gas law") that show the key formulas.\n' +
+        'RETURN JSON exactly as: {"markdown": "<the cheat sheet>", "wolframQueries": ["...", "..."]}';
+
+      const raw = await generateWithRetry({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        systemInstruction: PUSKICE_SYSTEM,
+        responseMimeType: "application/json",
+      });
+
+      let markdown = "";
+      let queries: string[] = [];
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        markdown = typeof parsed.markdown === "string" ? parsed.markdown : "";
+        if (Array.isArray(parsed.wolframQueries)) {
+          queries = parsed.wolframQueries
+            .filter((q): q is string => typeof q === "string")
+            .map((q) => q.trim())
+            .filter(Boolean)
+            .slice(0, 3);
+        }
+      } catch {
+        markdown = raw;
+      }
+
+      if (!markdown.trim()) {
+        res.status(502).json({ error: "AI nije vratio sadržaj. Pokušaj ponovo." });
+        return;
+      }
+
+      // Math / physics / chemistry → verify the key formulas with Wolfram Alpha
+      let source = "gemini";
+      if (queries.length > 0 && getWolframAppId()) {
+        const results = await Promise.all(
+          queries.slice(0, 2).map((q) => queryWolfram(q))
+        );
+        const blocks = results
+          .map((r) => formatWolframMarkdown(r))
+          .filter(Boolean);
+        if (blocks.length > 0) {
+          markdown = `${markdown}\n\n---\n\n${blocks.join("\n\n")}`;
+          source = "gemini+wolfram";
+        }
+      }
+
+      res.json({ markdown, source });
+    } catch (err: unknown) {
+      console.error("Puskice final error:", err);
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Greška pri pravljenju puskica",
+      });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // MESSAGES: every student gets a unique 6-char code (letters + numbers).
+  // You add a friend by typing their code and then exchange messages.
+  // Everything is stored in JSON files next to the project (no database).
+  // ------------------------------------------------------------------
+  const DATA_DIR = path.join(process.cwd(), "server-data");
+  const USERS_FILE = path.join(DATA_DIR, "users.json");
+  const MESSAGES_FILE = path.join(DATA_DIR, "messages.json");
+
+  interface StoredUser {
+    code: string;
+    name: string;
+    createdAt: string;
+  }
+  interface StoredMessage {
+    id: string;
+    from: string;
+    to: string;
+    text: string;
+    kind: "text" | "share";
+    title?: string;
+    createdAt: string;
+  }
+
+  function readJson<T>(file: string, fallback: T): T {
+    try {
+      if (!fs.existsSync(file)) return fallback;
+      return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function writeJson(file: string, data: unknown): void {
+    try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
+    } catch (err) {
+      console.error("Server data write failed:", err);
+    }
+  }
+
+  // No confusing characters (0/O, 1/I) — letters + numbers as requested
+  const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const CODE_LENGTH = 6;
+
+  function generateCode(taken: Set<string>): string {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      let code = "";
+      for (let i = 0; i < CODE_LENGTH; i++) {
+        code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+      }
+      if (!taken.has(code)) return code;
+    }
+    return "";
+  }
+
+  /** Returns (and creates on first use) the 6-char code for a user. */
+  app.post("/api/msg/register", (req, res) => {
+    try {
+      const userId = (typeof req.body?.userId === "string" ? req.body.userId : "").trim();
+      const name = (typeof req.body?.name === "string" ? req.body.name : "").trim();
+      if (!userId) {
+        res.status(400).json({ error: "userId je obavezan" });
+        return;
+      }
+
+      const users = readJson<Record<string, StoredUser>>(USERS_FILE, {});
+      const existing = users[userId];
+      if (existing?.code) {
+        if (name && existing.name !== name) {
+          existing.name = name;
+          writeJson(USERS_FILE, users);
+        }
+        res.json({ code: existing.code, name: existing.name });
+        return;
+      }
+
+      const taken = new Set(Object.values(users).map((u) => u.code));
+      const code = generateCode(taken);
+      if (!code) {
+        res.status(500).json({ error: "Ne mogu da generišem kod. Pokušaj ponovo." });
+        return;
+      }
+      users[userId] = { code, name: name || "Učenik", createdAt: new Date().toISOString() };
+      writeJson(USERS_FILE, users);
+      res.json({ code, name: users[userId].name });
+    } catch (err) {
+      console.error("msg/register error:", err);
+      res.status(500).json({ error: "Greška pri kreiranju koda" });
+    }
+  });
+
+  /** Finds a user by their 6-char code (so you can add them). */
+  app.post("/api/msg/lookup", (req, res) => {
+    try {
+      const code = (typeof req.body?.code === "string" ? req.body.code : "")
+        .trim()
+        .toUpperCase();
+      if (code.length !== CODE_LENGTH) {
+        res.status(400).json({ error: "Kod ima 6 znakova" });
+        return;
+      }
+      const users = readJson<Record<string, StoredUser>>(USERS_FILE, {});
+      const entry = Object.entries(users).find(([, u]) => u.code === code);
+      if (!entry) {
+        res.status(404).json({ error: "Kod nije pronađen. Proveri kod drugara." });
+        return;
+      }
+      res.json({ userId: entry[0], name: entry[1].name, code });
+    } catch (err) {
+      console.error("msg/lookup error:", err);
+      res.status(500).json({ error: "Greška pri pretrazi koda" });
+    }
+  });
+
+  /** Resolve a profile by user id (used for incoming unknown senders). */
+  app.get("/api/msg/user", (req, res) => {
+    try {
+      const id = typeof req.query.id === "string" ? req.query.id : "";
+      const users = readJson<Record<string, StoredUser>>(USERS_FILE, {});
+      const u = users[id];
+      if (!u) {
+        res.status(404).json({ error: "Korisnik nije pronađen" });
+        return;
+      }
+      res.json({ userId: id, name: u.name, code: u.code });
+    } catch (err) {
+      console.error("msg/user error:", err);
+      res.status(500).json({ error: "Greška" });
+    }
+  });
+
+  /** Sends one message (plain text or a shared puskice / AI answer). */
+  app.post("/api/msg/send", (req, res) => {
+    try {
+      const from = (typeof req.body?.from === "string" ? req.body.from : "").trim();
+      const to = (typeof req.body?.to === "string" ? req.body.to : "").trim();
+      const text = typeof req.body?.text === "string" ? req.body.text : "";
+      const kind = req.body?.kind === "share" ? "share" : "text";
+      const title = typeof req.body?.title === "string" ? req.body.title : undefined;
+
+      if (!from || !to) {
+        res.status(400).json({ error: "Pošiljalac i primalac su obavezni" });
+        return;
+      }
+      if (!text.trim()) {
+        res.status(400).json({ error: "Poruka je prazna" });
+        return;
+      }
+      const maxLen = kind === "share" ? 60_000 : 4_000;
+      if (text.length > maxLen) {
+        res.status(413).json({ error: "Poruka je preduga" });
+        return;
+      }
+
+      const messages = readJson<StoredMessage[]>(MESSAGES_FILE, []);
+      const message: StoredMessage = {
+        id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        from,
+        to,
+        text,
+        kind,
+        title,
+        createdAt: new Date().toISOString(),
+      };
+      messages.push(message);
+      // keep the archive from growing forever
+      if (messages.length > 5000) messages.splice(0, messages.length - 5000);
+      writeJson(MESSAGES_FILE, messages);
+      res.json({ message });
+    } catch (err) {
+      console.error("msg/send error:", err);
+      res.status(500).json({ error: "Greška pri slanju poruke" });
+    }
+  });
+
+  /** Full conversation between me and one contact (oldest first). */
+  app.get("/api/msg/thread", (req, res) => {
+    try {
+      const me = typeof req.query.me === "string" ? req.query.me : "";
+      const peer = typeof req.query.peer === "string" ? req.query.peer : "";
+      if (!me || !peer) {
+        res.status(400).json({ error: "me i peer su obavezni" });
+        return;
+      }
+      const messages = readJson<StoredMessage[]>(MESSAGES_FILE, []);
+      const thread = messages
+        .filter(
+          (m) => (m.from === me && m.to === peer) || (m.from === peer && m.to === me)
+        )
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      res.json({ messages: thread });
+    } catch (err) {
+      console.error("msg/thread error:", err);
+      res.status(500).json({ error: "Greška pri učitavanju poruka" });
+    }
+  });
+
+  /** Polling: everything sent to me after a timestamp. */
+  app.get("/api/msg/inbox", (req, res) => {
+    try {
+      const me = typeof req.query.me === "string" ? req.query.me : "";
+      const since = typeof req.query.since === "string" ? req.query.since : "";
+      if (!me) {
+        res.status(400).json({ error: "me je obavezan" });
+        return;
+      }
+      const messages = readJson<StoredMessage[]>(MESSAGES_FILE, []);
+      const fresh = messages
+        .filter((m) => m.to === me && (!since || m.createdAt > since))
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      res.json({ messages: fresh });
+    } catch (err) {
+      console.error("msg/inbox error:", err);
+      res.status(500).json({ error: "Greška" });
     }
   });
 

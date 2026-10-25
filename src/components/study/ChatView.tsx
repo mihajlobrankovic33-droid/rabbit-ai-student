@@ -1,40 +1,32 @@
 import React, { useState, useRef, useEffect } from "react";
-import type { AnimalTeacher, ChatMessage, Note } from "@/types/study";
+import type { AnimalTeacher, ChatMessage } from "@/types/study";
 import { Button } from "@/components/ui/button";
 import { useStudyAI } from "@/hooks/use-study-ai";
 import { getSelectedAIProvider } from "@/services/study/aiService";
 import { getSavedBrowserModel, IN_BROWSER_MODELS } from "@/services/study/webLlmService";
 import { useI18n } from "@/services/study/i18n";
-import { saveNote } from "@/services/study/notesService";
 import {
   ANIMAL_TEACHERS,
   getActiveAnimalTeacher,
   setActiveAnimalTeacher,
-  speakTeacherText,
-  stopSpeaking,
-  createSpeechRecognizer,
 } from "@/services/study/animalTeacherService";
 import Markdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
+import { ShareDialog } from "@/components/study/ShareDialog";
 import {
   ArrowRight,
-  BookMarked,
   Check,
   Copy,
   Download,
-  GraduationCap,
   Lightbulb,
   Loader2,
-  Mic,
-  MicOff,
+  Share2,
   Sparkles,
   Square,
   Trash2,
   User,
-  Volume2,
-  VolumeX,
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -44,7 +36,6 @@ interface ChatViewProps {
   onSaveSession?: (messages: ChatMessage[]) => void;
   onOpenSettings?: () => void;
   onOpenHamburger?: () => void;
-  onSwitchToClassroom?: () => void;
 }
 
 const STARTER_PROMPTS_BY_LANG: Record<string, { label: string; text: string }[]> = {
@@ -68,14 +59,12 @@ export function ChatView({
   initialMessages = [],
   onSaveSession,
   onOpenSettings,
-  onSwitchToClassroom,
 }: ChatViewProps) {
   const { lang, t } = useI18n();
 
   // Cute Animal Teacher State
   const [activeTeacher, setActiveTeacherState] = useState<AnimalTeacher>(getActiveAnimalTeacher());
   const [showTeacherPicker, setShowTeacherPicker] = useState(false);
-  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     initialMessages.length > 0
@@ -92,14 +81,10 @@ export function ChatView({
 
   const [input, setInput] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [savedNoteId, setSavedNoteId] = useState<string | null>(null);
+  const [shareMsg, setShareMsg] = useState<ChatMessage | null>(null);
   const { chatWithAI, cancelGeneration, isLoading } = useStudyAI();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Speech recognition for dictation
-  const [isListening, setIsListening] = useState(false);
-  const speechRecognizerRef = useRef<{ start: () => void; stop: () => void; isSupported: boolean } | null>(null);
 
   const [currentProvider, setCurrentProvider] = useState(getSelectedAIProvider());
 
@@ -125,69 +110,14 @@ export function ChatView({
     window.addEventListener("study_buddy_animal_teacher_changed", handleTeacherChange);
     return () => {
       window.removeEventListener("study_buddy_animal_teacher_changed", handleTeacherChange);
-      stopSpeaking();
     };
   }, []);
 
-  // Initialize browser speech recognition for active language
-  useEffect(() => {
-    speechRecognizerRef.current = createSpeechRecognizer(
-      lang,
-      (transcript) => {
-        setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
-        setIsListening(false);
-        toast.info("Glas je prepoznat! 🎙️");
-      },
-      (err) => {
-        setIsListening(false);
-        console.warn("Speech error:", err);
-      },
-      () => {
-        setIsListening(false);
-      }
-    );
-
-    return () => {
-      stopSpeaking();
-    };
-  }, [lang]);
-
-  const toggleSpeechRecognition = () => {
-    if (!speechRecognizerRef.current?.isSupported) {
-      toast.error("Tvoj pregledač ne podržava direktno prepoznavanje glasa.");
-      return;
-    }
-
-    if (isListening) {
-      speechRecognizerRef.current.stop();
-      setIsListening(false);
-    } else {
-      setIsListening(true);
-      speechRecognizerRef.current.start();
-      toast.info("Govori sada, nastavnik te pažljivo sluša... 🎙️");
-    }
-  };
-
   const handleSelectTeacher = (teacher: AnimalTeacher) => {
-    stopSpeaking();
     setActiveTeacherState(teacher);
     setActiveAnimalTeacher(teacher.id);
     setShowTeacherPicker(false);
     toast.success(`${teacher.title} (${teacher.species}) je sada tvoj nastavnik! ${teacher.emoji}`);
-  };
-
-  const handleSpeakMessage = (msgId: string, content: string) => {
-    if (speakingMsgId === msgId) {
-      stopSpeaking();
-      setSpeakingMsgId(null);
-      return;
-    }
-
-    stopSpeaking();
-    setSpeakingMsgId(msgId);
-    speakTeacherText(content, activeTeacher, lang, () => {
-      setSpeakingMsgId(null);
-    });
   };
 
   const savedBrowserModel = getSavedBrowserModel();
@@ -280,27 +210,6 @@ export function ChatView({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleSaveAsNote = (msg: ChatMessage) => {
-    const lines = msg.content.split("\n").filter((l) => l.trim().length > 0);
-    const title = lines[0]?.replace(/^[#*\s-]+/, "").slice(0, 50) || "AI Study Explanation";
-    const note: Note = {
-      id: `note-${Date.now()}`,
-      title,
-      topic: "Saved from AI Chat",
-      createdAt: new Date().toISOString(),
-      content: {
-        title,
-        keyPoints: lines.slice(1, 6).map((l) => l.replace(/^[#*\s-]+/, "").slice(0, 120)),
-        summary: msg.content.slice(0, 200) + "...",
-        fullNotes: msg.content,
-      },
-    };
-    saveNote(note);
-    setSavedNoteId(msg.id);
-    toast.success("Saved directly to your Study Notes Library!");
-    setTimeout(() => setSavedNoteId(null), 2500);
-  };
-
   const handleExportChat = () => {
     const textContent = messages
       .map(
@@ -339,7 +248,7 @@ export function ChatView({
   };
 
   return (
-    <div className="flex h-[calc(100dvh-9.5rem)] md:h-[calc(100vh-8.5rem)] flex-col rounded-3xl border border-border/80 bg-card/95 shadow-xl backdrop-blur-sm overflow-hidden">
+    <div className="flex h-[calc(100dvh-11rem)] md:h-[calc(100vh-8.5rem)] flex-col rounded-3xl border border-border/80 bg-card/95 shadow-xl backdrop-blur-sm overflow-hidden">
       {/* Top Header Bar */}
       <div className="flex items-center justify-between border-b border-border/70 bg-muted/25 px-3 sm:px-6 py-2 sm:py-2.5 text-xs">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -347,7 +256,7 @@ export function ChatView({
           <button
             type="button"
             onClick={() => setShowTeacherPicker(!showTeacherPicker)}
-            className="flex cursor-pointer items-center gap-1.5 rounded-2xl border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-bold text-foreground transition-all hover:bg-primary/20 hover:scale-102"
+            className="flex min-h-[38px] cursor-pointer items-center gap-1.5 rounded-2xl border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-bold text-foreground transition-all hover:bg-primary/20 hover:scale-102 sm:min-h-0"
             title="Klikni da promeniš životinjskog nastavnika"
           >
             <span className="text-base">{activeTeacher.emoji}</span>
@@ -364,20 +273,6 @@ export function ChatView({
 
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              {/* Classroom Oral Exam Button */}
-              {onSwitchToClassroom && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onSwitchToClassroom}
-                  className="h-7 cursor-pointer rounded-xl border-primary/40 bg-primary/5 px-2.5 text-[11px] font-extrabold text-primary hover:bg-primary/15 gap-1.5 shadow-2xs"
-                  title="Izađi pred tablu u Učionicu"
-                >
-                  <GraduationCap className="h-3.5 w-3.5" />
-                  <span>Učionica (Ispitivanje)</span>
-                </Button>
-              )}
-
               {/* Active AI Model Chip */}
               {onOpenSettings && (
                 <button
@@ -426,7 +321,7 @@ export function ChatView({
           <button
             type="button"
             onClick={handleExportChat}
-            className="flex cursor-pointer items-center gap-1 rounded-xl border border-border/70 bg-background px-2 sm:px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
+            className="flex min-h-[38px] cursor-pointer items-center gap-1 rounded-xl border border-border/70 bg-background px-3 sm:px-2.5 py-2 sm:py-1.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-muted hover:text-foreground sm:min-h-0"
             title="Preuzmi transkript razgovora (.md)"
           >
             <Download className="h-3.5 w-3.5" />
@@ -436,7 +331,7 @@ export function ChatView({
           <button
             type="button"
             onClick={handleClearChat}
-            className="flex cursor-pointer items-center gap-1 rounded-xl border border-border/70 bg-background px-2 sm:px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive"
+            className="flex min-h-[38px] cursor-pointer items-center gap-1 rounded-xl border border-border/70 bg-background px-3 sm:px-2.5 py-2 sm:py-1.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive sm:min-h-0"
             title="Isprazni i očisti razgovor"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -487,9 +382,9 @@ export function ChatView({
         </div>
       )}
 
-      {/* Suggested Starter Chips */}
+      {/* Suggested Starter Chips — hidden on mobile so the chat fits the screen */}
       {messages.length <= 2 && (
-        <div className="border-b border-border/40 bg-muted/15 px-3 sm:px-6 py-2 overflow-x-auto no-scrollbar">
+        <div className="hidden sm:block border-b border-border/40 bg-muted/15 px-3 sm:px-6 py-2 overflow-x-auto no-scrollbar">
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-max">
             <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-primary">
               <Zap className="h-3.5 w-3.5 text-amber-500" />
@@ -521,12 +416,6 @@ export function ChatView({
               {!isUser && (
                 <div className="relative flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-2xl bg-card border border-primary/30 shadow-xs text-base sm:text-lg mt-0.5">
                   <span>{activeTeacher.emoji}</span>
-                  {speakingMsgId === msg.id && (
-                    <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
-                    </span>
-                  )}
                 </div>
               )}
 
@@ -552,32 +441,11 @@ export function ChatView({
                 {/* Assistant Message Tool Footer */}
                 {!isUser && (
                   <div className="mt-1.5 flex flex-wrap items-center gap-2.5 sm:gap-3 px-1 sm:px-2 text-[10px] sm:text-[11px] text-muted-foreground opacity-90 transition-opacity">
-                    {/* Speak Voice Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleSpeakMessage(msg.id, msg.content)}
-                      className={`flex cursor-pointer items-center gap-1 font-medium transition-colors min-h-[30px] ${
-                        speakingMsgId === msg.id ? "text-primary font-bold" : "hover:text-foreground"
-                      }`}
-                      title="Slušaj glas nastavnika"
-                    >
-                      {speakingMsgId === msg.id ? (
-                        <>
-                          <VolumeX className="h-3 w-3 text-primary animate-pulse" />
-                          <span className="text-primary font-bold">Zaustavi</span>
-                        </>
-                      ) : (
-                        <>
-                          <Volume2 className="h-3 w-3" />
-                          <span>Čitaj naglas</span>
-                        </>
-                      )}
-                    </button>
-
+                    {/* Copy Button */}
                     <button
                       type="button"
                       onClick={() => handleCopyMessage(msg.id, msg.content)}
-                      className="flex cursor-pointer items-center gap-1 hover:text-foreground font-medium transition-colors min-h-[30px]"
+                      className="flex cursor-pointer items-center gap-1 hover:text-foreground font-medium transition-colors min-h-[40px] sm:min-h-[30px]"
                     >
                       {copiedId === msg.id ? (
                         <>
@@ -594,31 +462,23 @@ export function ChatView({
 
                     <button
                       type="button"
-                      onClick={() => handleSaveAsNote(msg)}
-                      className="flex cursor-pointer items-center gap-1 hover:text-primary font-medium transition-colors min-h-[30px]"
-                    >
-                      {savedNoteId === msg.id ? (
-                        <>
-                          <Check className="h-3 w-3 text-emerald-500" />
-                          <span className="text-emerald-500 font-bold">Sačuvano!</span>
-                        </>
-                      ) : (
-                        <>
-                          <BookMarked className="h-3 w-3 text-primary" />
-                          <span>{t("saveToNotes")}</span>
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
                       onClick={() =>
                         handleSend(`Možeš li mi ovo objasniti jednostavnije sa slikovitom analogijom?`)
                       }
-                      className="flex cursor-pointer items-center gap-1 hover:text-amber-500 font-medium transition-colors min-h-[30px]"
+                      className="flex cursor-pointer items-center gap-1 hover:text-amber-500 font-medium transition-colors min-h-[40px] sm:min-h-[30px]"
                     >
                       <Lightbulb className="h-3 w-3 text-amber-500" />
                       <span>Pojednostavi</span>
+                    </button>
+
+                    {/* Share this AI answer with a friend */}
+                    <button
+                      type="button"
+                      onClick={() => setShareMsg(msg)}
+                      className="flex cursor-pointer items-center gap-1 hover:text-primary font-medium transition-colors min-h-[40px] sm:min-h-[30px]"
+                    >
+                      <Share2 className="h-3 w-3 text-primary" />
+                      <span>{t("share")}</span>
                     </button>
                   </div>
                 )}
@@ -654,8 +514,8 @@ export function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Quick Action Pills for Students */}
-      <div className="border-t border-border/50 bg-background/50 px-4 py-2 overflow-x-auto no-scrollbar">
+      {/* Quick Action Pills for Students — hidden on mobile so more chat fits */}
+      <div className="hidden sm:block border-t border-border/50 bg-background/50 px-4 py-2 overflow-x-auto no-scrollbar">
         <div className="flex items-center gap-1.5 min-w-max">
           <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mr-1 flex items-center gap-1">
             <span>{activeTeacher.rewardIcon}</span> Predlozi:
@@ -676,20 +536,6 @@ export function ChatView({
       {/* Composer Input Area */}
       <div className="border-t border-border/70 bg-background/90 p-3 sm:p-4 backdrop-blur-md">
         <div className="flex items-end gap-2">
-          {/* Voice Input Mic Button */}
-          <button
-            type="button"
-            onClick={toggleSpeechRecognition}
-            className={`cursor-pointer h-11 w-11 shrink-0 rounded-2xl flex items-center justify-center border transition-all ${
-              isListening
-                ? "bg-rose-500 text-white border-rose-600 animate-pulse shadow-md"
-                : "bg-card border-border/80 text-muted-foreground hover:text-primary hover:border-primary/40"
-            }`}
-            title={isListening ? "Zaustavi snimanje glasa" : "Diktiraj pitanje ili odgovor glasom"}
-          >
-            {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-          </button>
-
           <div className="relative flex-1 rounded-2xl border border-input bg-card shadow-xs transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
             <textarea
               ref={textareaRef}
@@ -699,7 +545,7 @@ export function ChatView({
               onKeyDown={handleKeyDown}
               placeholder={`Pitaj nastavnika (${activeTeacher.title}) ili odgovori...`}
               disabled={isLoading}
-              className="w-full resize-none bg-transparent px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none max-h-40 min-h-[44px]"
+              className="w-full resize-none bg-transparent px-4 py-3 text-base md:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none max-h-40 min-h-[44px]"
             />
             <div className="flex items-center justify-between px-3 pb-2 text-[10px] text-muted-foreground">
               <span className="hidden sm:inline">
@@ -732,6 +578,16 @@ export function ChatView({
           )}
         </div>
       </div>
+
+      {/* Share picker for an AI answer */}
+      <ShareDialog
+        open={shareMsg !== null}
+        onOpenChange={(open) => {
+          if (!open) setShareMsg(null);
+        }}
+        title="Odgovor AI"
+        content={shareMsg?.content || ""}
+      />
     </div>
   );
 }

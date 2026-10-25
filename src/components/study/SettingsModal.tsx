@@ -18,17 +18,6 @@ import {
   AlertCircle,
   Zap,
   Volume2,
-  Play,
-  Square,
-  Check,
-  Languages,
-  Key,
-  Eye,
-  EyeOff,
-  Trash2,
-  Loader2,
-  ExternalLink,
-  Sliders,
 } from "lucide-react";
 import {
   AIProvider,
@@ -51,18 +40,9 @@ import {
 import {
   getVoiceSettings,
   saveVoiceSettings,
-  getAvailableVoices,
-  speakText,
   stopSpeaking,
-  checkServerTTSStatus,
-  validateElevenLabsKey,
-  getLastTTSError,
-  KeyValidationResult,
-  ELEVENLABS_VOICES,
-  TTSProvider,
   VoiceSettings,
 } from "@/services/study/voiceService";
-import { useI18n } from "@/services/study/i18n";
 import { toast } from "sonner";
 
 interface SettingsModalProps {
@@ -71,7 +51,6 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
-  const { lang } = useI18n();
   const [activeTab, setActiveTab] = useState<"ai" | "voice" | "offline">("ai");
 
   // AI Provider state
@@ -90,15 +69,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
 
   // Voice Settings state
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(getVoiceSettings());
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [hasElevenLabsKey, setHasElevenLabsKey] = useState(false);
-  const [isServerKeyAnId, setIsServerKeyAnId] = useState(false);
-  const [serverKeyLength, setServerKeyLength] = useState<number | undefined>(undefined);
-  const [localElevenKey, setLocalElevenKey] = useState("");
-  const [showElevenKey, setShowElevenKey] = useState(false);
-  const [isTestingVoice, setIsTestingVoice] = useState(false);
-  const [isValidatingKey, setIsValidatingKey] = useState(false);
-  const [keyValidationResult, setKeyValidationResult] = useState<KeyValidationResult | null>(null);
 
   // Offline / SW state
   const [isAppCached, setIsAppCached] = useState(false);
@@ -114,14 +84,6 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
 
       const vSettings = getVoiceSettings();
       setVoiceSettings(vSettings);
-      setLocalElevenKey(vSettings.elevenApiKey || "");
-      setAvailableVoices(getAvailableVoices());
-
-      checkServerTTSStatus().then((status) => {
-        setHasElevenLabsKey(status.hasElevenLabsKey);
-        setIsServerKeyAnId(Boolean(status.isServerKeyAnId));
-        setServerKeyLength(status.serverKeyLength);
-      });
 
       checkWebGPUCapability().then((cap) => {
         setGpuCapability(cap);
@@ -137,133 +99,8 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
       setIsAppCached(isAppLocallyCached());
     } else {
       stopSpeaking();
-      setIsTestingVoice(false);
     }
   }, [open]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      const handleVoices = () => {
-        setAvailableVoices(getAvailableVoices());
-      };
-      window.speechSynthesis.addEventListener("voiceschanged", handleVoices);
-      return () => {
-        window.speechSynthesis.removeEventListener("voiceschanged", handleVoices);
-      };
-    }
-  }, []);
-
-  const handleTestVoice = (withEmotions: boolean = false) => {
-    if (isTestingVoice) {
-      stopSpeaking();
-      setIsTestingVoice(false);
-      return;
-    }
-
-    const testPhrases: Record<string, string> = {
-      sr: "Zdravo! Ja sam tvoj lični profesor i asistent za učenje. Da li me čuješ potpuno jasno i razgovetno?",
-      hr: "Pozdrav! Ja sam tvoj osobni profesor i asistent za učenje. Čuješ li me potpuno jasno i razgovijetno?",
-      bs: "Zdravo! Ja sam tvoj lični profesor i asistent za učenje. Da li me čuješ potpuno jasno i razgovetno?",
-      en: "Hello! I am your personal study tutor and buddy. Can you hear and understand my voice clearly?",
-      de: "Hallo! Ich bin dein persönlicher Lernassistent. Kannst du mich klar und deutlich verstehen?",
-      fr: "Bonjour! Je suis ton tuteur d'apprentissage personnel. Est-ce que tu m'entends clairement et distinctement?",
-      es: "¡Hola! Soy tu tutor personal de estudio. ¿Puedes escucharme y entenderme con total claridad?",
-      it: "Ciao! Sono il tuo tutor personale di studio. Mi senti in modo chiaro e comprensibile?",
-      ru: "Привет! Я твой персональный репетитор. Ты слышишь и понимаешь мой голос чётко и разборчиво?",
-      pt: "Olá! Eu sou seu tutor pessoal de estudos. Você consegue me ouvir com total clareza?",
-      tr: "Merhaba! Ben senin kişisel çalışma öğretmeninim. Sesimi net ve anlaşılır duyabiliyor musun?",
-    };
-
-    const emotionPhrases: Record<string, string> = {
-      sr: "[gently] Zdravo! [excitedly] Spreman sam za učenje sa tobom! [whispers] Otkrićemo sve tajne gradiva zajedno.",
-      hr: "[gently] Bok! [excitedly] Spreman sam za učenje s tobom! [whispers] Otkrit ćemo sve tajne gradiva zajedno.",
-      bs: "[gently] Zdravo! [excitedly] Spreman sam za učenje sa tobom! [whispers] Otkrit ćemo sve tajne gradiva zajedno.",
-      en: "[gently] Hello there! [excitedly] I am so excited to learn with you today! [whispers] Together, we will master everything.",
-      de: "[gently] Hallo! [excitedly] Ich freue mich riesig auf das Lernen mit dir! [whispers] Wir schaffen das gemeinsam.",
-      fr: "[gently] Bonjour! [excitedly] Je suis ravi d'apprendre avec toi! [whispers] Nous allons tout réussir ensemble.",
-      es: "[gently] ¡Hola! [excitedly] ¡Estoy muy emocionado de aprender contigo hoy! [whispers] Juntos dominaremos todo.",
-      it: "[gently] Ciao! [excitedly] Sono così felice di imparare con te! [whispers] Insieme scopriremo cose meravigliose.",
-      ru: "[gently] Привет! [excitedly] Я очень рад учиться вместе с тобой! [whispers] Вместе мы всё освоим.",
-      pt: "[gently] Olá! [excitedly] Estou muito animado para aprender com você! [whispers] Juntos vamos dominar tudo.",
-      tr: "[gently] Merhaba! [excitedly] Seninle birlikte çalışmaktan çok heyecanlıyım! [whispers] Birlikte her şeyi başaracağız.",
-    };
-
-    const phrase = withEmotions
-      ? (emotionPhrases[lang] || emotionPhrases.en)
-      : (testPhrases[lang] || testPhrases.en);
-
-    setIsTestingVoice(true);
-    speakText(phrase, {
-      lang,
-      rate: voiceSettings.rate,
-      pitch: voiceSettings.pitch,
-      preferredVoiceURI: voiceSettings.preferredVoiceURI,
-      elevenVoiceId: voiceSettings.elevenVoiceId,
-      elevenModelId: voiceSettings.elevenModelId,
-      stability: voiceSettings.elevenStability,
-      similarityBoost: voiceSettings.elevenSimilarityBoost,
-      style: voiceSettings.elevenStyle,
-      provider: voiceSettings.provider,
-      onEnd: () => {
-        setIsTestingVoice(false);
-        const lastErr = getLastTTSError();
-        if (lastErr && (voiceSettings.provider === "elevenlabs" || voiceSettings.provider === "auto")) {
-          if (lastErr.isKeyId) {
-            toast.warning("ElevenLabs kod je ID ključa umesto tajnog 'sk_' ključa. Glas je uspešno reprodukovan preko prirodnog glasovnog servera!");
-          } else {
-            toast.info(`ElevenLabs nije uspeo (${lastErr.message}). Glas je reprodukovan preko prirodnog glasovnog servera.`);
-          }
-        }
-      },
-      onError: (err) => {
-        setIsTestingVoice(false);
-        console.warn("Test voice error:", err);
-      },
-    });
-  };
-
-  const handleValidateKey = async () => {
-    const keyToTest = localElevenKey.trim();
-    if (!keyToTest) {
-      toast.warning("Prvo unesite ElevenLabs API ključ za proveru.");
-      return;
-    }
-
-    if (!keyToTest.startsWith("sk_")) {
-      const errRes: KeyValidationResult = {
-        valid: false,
-        isKeyId: true,
-        error: "Uneli ste ID ključa (Key ID) a ne tajni API ključ! ElevenLabs API ključ uvek počinje sa 'sk_'.",
-      };
-      setKeyValidationResult(errRes);
-      toast.error(errRes.error);
-      return;
-    }
-
-    setIsValidatingKey(true);
-    setKeyValidationResult(null);
-    try {
-      const res = await validateElevenLabsKey(keyToTest);
-      setKeyValidationResult(res);
-      if (res.valid) {
-        toast.success(`ElevenLabs ključ je ispravan! Preostalo: ${(res.remaining ?? 0).toLocaleString()} karaktera (${res.tier || "Free"}).`);
-      } else if (res.isKeyId) {
-        toast.error("Uneli ste ID ključa umesto tajnog API ključa! Ključ mora počinjati sa 'sk_'.");
-      } else {
-        toast.error(`Provera nije uspela: ${res.error || "Nevažeći ključ"}`);
-      }
-    } catch {
-      toast.error("Greška pri povezivanju sa serverom za proveru ključa.");
-    } finally {
-      setIsValidatingKey(false);
-    }
-  };
-
-  const updateVoiceSettings = (partial: Partial<VoiceSettings>) => {
-    const updated = { ...voiceSettings, ...partial };
-    setVoiceSettings(updated);
-    saveVoiceSettings(updated);
-  };
 
   const handleDownloadInBrowserModel = async () => {
     if (!gpuCapability.supported) {
@@ -318,14 +155,13 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     setSavedBrowserModel(browserModel);
     saveVoiceSettings(voiceSettings);
     stopSpeaking();
-    setIsTestingVoice(false);
     toast.success("Podešavanja su uspešno sačuvana!");
     onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto p-5 sm:p-6">
+      <DialogContent className="w-[calc(100%-1rem)] sm:w-full max-h-[90vh] max-w-2xl overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -334,7 +170,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
             <div>
               <DialogTitle className="text-lg font-bold">Podešavanja & AI Motor</DialogTitle>
               <DialogDescription className="text-xs">
-                Podesi AI mozak (WebGPU ili Cloud), kristalno čist glas za ispitivanje i offline keširanje aplikacije.
+                Podesi AI mozak (WebGPU ili Cloud) i offline keširanje aplikacije.
               </DialogDescription>
             </div>
           </div>
@@ -364,7 +200,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
             }`}
           >
             <Volume2 className="h-3.5 w-3.5 text-blue-500" />
-            Glas & Izgovor
+            Govor
           </button>
           <button
             type="button"
@@ -672,643 +508,14 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
 
         {activeTab === "voice" && (
           <div className="space-y-4 py-1">
-            {/* Header / Intro Card */}
-            <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3.5 text-xs">
-              <div className="flex items-center gap-2 mb-1.5 text-blue-600 dark:text-blue-400 font-semibold">
-                <Volume2 className="h-4 w-4 shrink-0" />
-                <span>Multimodalna sinteza glasa — ElevenLabs AI & Sistemski glasovi</span>
-              </div>
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
-                Aplikacija podržava <strong>ElevenLabs AI studio modele</strong> sa realističnim ljudskim disanjem i emocijom, kao i <strong>Edge Natural i sistemske glasove</strong> za 100% offline učenje bez kašnjenja.
-              </p>
-            </div>
-
-            {/* Voice Provider Mode */}
-            <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Izbor zvučnog mehanizma (Voice Engine)
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                {[
-                  {
-                    id: "auto",
-                    title: "Automatski (Preporučeno)",
-                    desc: "ElevenLabs studio ako je ključ validan, inače kristalno jasan prirodni glas",
-                    badge: "Preporučeno",
-                  },
-                  {
-                    id: "natural",
-                    title: "Prirodni glas (Natural)",
-                    desc: "Visokokvalitetni prirodni govor na srpskom jeziku bez potrebe za ključem",
-                    badge: "Bez ključa",
-                  },
-                  {
-                    id: "elevenlabs",
-                    title: "ElevenLabs AI Studio",
-                    desc: "Maksimalan realizam i ljudska intonacija uz ElevenLabs sk_ ključ",
-                    badge: "Ultra HD",
-                  },
-                  {
-                    id: "browser",
-                    title: "Sistemski glas (Offline)",
-                    desc: "Lokalno generisanje na tvom uređaju bez upotrebe interneta",
-                    badge: "100% Offline",
-                  },
-                ].map((p) => {
-                  const isSelected = voiceSettings.provider === p.id;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => updateVoiceSettings({ provider: p.id as TTSProvider })}
-                      className={`cursor-pointer rounded-xl border p-3 text-left transition-all ${
-                        isSelected
-                          ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary shadow-xs"
-                          : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-1 mb-1">
-                        <span className="font-bold text-xs text-foreground">{p.title}</span>
-                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${
-                          isSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                        }`}>
-                          {p.badge}
-                        </span>
-                      </div>
-                      <p className="text-[11px] leading-tight text-muted-foreground">{p.desc}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* ElevenLabs Status & Curated Voices */}
-            {voiceSettings.provider !== "browser" && (
-              <div className="rounded-xl border border-border/80 bg-card p-4 space-y-3 shadow-xs">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-amber-500" />
-                    <h4 className="text-xs font-bold text-foreground">ElevenLabs AI Studio Glasovi</h4>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {hasElevenLabsKey ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                        <CheckCircle2 className="h-3 w-3" />
-                        API ključ aktivan
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full">
-                        <CheckCircle2 className="h-3 w-3" />
-                        Aktivan Prirodni glas (Natural Voice)
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Warning if the server or local key is a Key ID */}
-                {isServerKeyAnId && !voiceSettings.elevenApiKey && (
-                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs space-y-2 text-foreground">
-                    <div className="flex items-center gap-1.5 font-bold text-amber-600 dark:text-amber-400">
-                      <AlertCircle className="h-4 w-4 shrink-0" />
-                      <span>Postavljeni ključ je ID ključa ({serverKeyLength || 64} karaktera), a ne tajni ElevenLabs API ključ!</span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      U sistemskim postavkama projekta je unet <strong>Key ID</strong> iz ElevenLabs tabele umesto tajnog API ključa. ElevenLabs API uvek zahteva tajni ključ koji počinje sa <code className="font-mono font-bold text-foreground bg-background px-1.5 py-0.5 rounded border border-amber-500/30">sk_</code>.
-                    </p>
-                    <div className="text-[11px] text-muted-foreground rounded bg-background/80 p-2.5 border border-border/60 space-y-1.5">
-                      <p className="font-semibold text-foreground flex items-center gap-1">
-                        Kako uneti ispravan ključ:
-                        <a
-                          href="https://elevenlabs.io/app/settings/api-keys"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-primary inline-flex items-center gap-0.5 underline font-medium ml-1"
-                        >
-                          ElevenLabs API Keys <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </p>
-                      <ol className="list-decimal list-inside space-y-0.5 text-[11px]">
-                        <li>Otvori ElevenLabs kontrolnu tablu</li>
-                        <li>Klikni na <strong>+ Create Key</strong> (ili rotiraj/napravi novi)</li>
-                        <li>Kopiraj tajni ključ koji počinje sa <strong>sk_...</strong></li>
-                        <li>Zalepi ga u polje ispod i klikni <strong>Sačuvaj</strong></li>
-                      </ol>
-                    </div>
-                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                      ✓ Aplikacija trenutno automatski koristi <strong>Prirodni glasovni server (Natural TTS)</strong> tako da nastavnik govori potpuno razgovetno!
-                    </p>
-                  </div>
-                )}
-
-                {/* API Key configuration */}
-                <div className="rounded-lg border border-border/70 bg-background p-3.5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                      <Key className="h-3.5 w-3.5 text-primary" />
-                      <span>ElevenLabs API Ključ</span>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground">
-                      {voiceSettings.elevenApiKey ? "Lokalno sačuvan u pregledaču" : (hasElevenLabsKey ? "Konfigurisan na serveru" : "Nije unesen")}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                    <div className="relative flex-1">
-                      <input
-                        type={showElevenKey ? "text" : "password"}
-                        value={localElevenKey}
-                        onChange={(e) => {
-                          setLocalElevenKey(e.target.value);
-                          setKeyValidationResult(null);
-                        }}
-                        placeholder={hasElevenLabsKey && !voiceSettings.elevenApiKey ? "Aktivan ključ sa servera (ELEVENLABS_API_KEY)" : "sk_..."}
-                        className={`w-full rounded-lg border bg-card px-3 py-1.5 pr-8 text-xs font-mono text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 ${
-                          localElevenKey.trim().length > 0 && !localElevenKey.trim().startsWith("sk_")
-                            ? "border-amber-500/80 focus:ring-amber-500 text-amber-900 dark:text-amber-200"
-                            : "border-border focus:ring-primary"
-                        }`}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowElevenKey(!showElevenKey)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                        title={showElevenKey ? "Sakrij ključ" : "Prikaži ključ"}
-                      >
-                        {showElevenKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={isValidatingKey || !localElevenKey.trim()}
-                        onClick={handleValidateKey}
-                        className="h-8 text-xs px-2.5 font-medium cursor-pointer"
-                        title="Proveri ispravnost ključa na ElevenLabs serveru"
-                      >
-                        {isValidatingKey ? (
-                          <>
-                            <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                            <span>Provera...</span>
-                          </>
-                        ) : (
-                          <span>Proveri ključ</span>
-                        )}
-                      </Button>
-
-                      <Button
-                        size="sm"
-                        variant="default"
-                        onClick={() => {
-                          const trimmed = localElevenKey.trim();
-                          if (trimmed && !trimmed.startsWith("sk_")) {
-                            toast.error("Oprez: Uneti kod je ID ključa, a ne tajni API ključ. ElevenLabs ključ mora počinjati sa 'sk_'.");
-                          }
-                          updateVoiceSettings({ elevenApiKey: trimmed });
-                          if (trimmed) {
-                            const isKeyId = !trimmed.startsWith("sk_");
-                            setHasElevenLabsKey(!isKeyId);
-                            if (!isKeyId) {
-                              toast.success("ElevenLabs API ključ je uspešno sačuvan!");
-                            } else {
-                              toast.warning("Ključ je sačuvan, ali proverite da li počinje sa 'sk_'.");
-                            }
-                          } else {
-                            checkServerTTSStatus().then((s) => setHasElevenLabsKey(s.hasElevenLabsKey));
-                            toast.info("Lokalni ključ je uklonjen.");
-                          }
-                        }}
-                        className="h-8 text-xs px-3 font-semibold cursor-pointer"
-                      >
-                        Sačuvaj
-                      </Button>
-
-                      {voiceSettings.elevenApiKey && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setLocalElevenKey("");
-                            setKeyValidationResult(null);
-                            updateVoiceSettings({ elevenApiKey: "" });
-                            checkServerTTSStatus().then((s) => setHasElevenLabsKey(s.hasElevenLabsKey));
-                            toast.info("ElevenLabs ključ obrisan iz pregledača.");
-                          }}
-                          className="h-8 text-xs px-2 text-destructive hover:bg-destructive/10 cursor-pointer"
-                          title="Obriši ključ"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Proactive warning when Key ID is detected */}
-                  {localElevenKey.trim().length > 0 && !localElevenKey.trim().startsWith("sk_") && (
-                    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs space-y-2 text-foreground">
-                      <div className="flex items-center gap-1.5 font-bold text-amber-600 dark:text-amber-400">
-                        <AlertCircle className="h-4 w-4 shrink-0" />
-                        <span>Kopiran je ID ključa (Key ID), a ne tajni ElevenLabs API ključ!</span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        ElevenLabs API ključ uvek počinje sa <code className="font-mono font-bold text-foreground bg-background px-1 py-0.5 rounded border border-amber-500/30">sk_</code>. Vrednost koju ste nalepili je identifikator iz kolone <em>Key ID</em>, koji ElevenLabs ne prihvata za autorizaciju.
-                      </p>
-                      <div className="rounded bg-background/80 p-2 text-[11px] border border-border/70 space-y-1">
-                        <span className="font-semibold text-foreground flex items-center gap-1">
-                          Kako preuzeti pravi secret key:
-                        </span>
-                        <ol className="list-decimal pl-4 space-y-1 text-muted-foreground">
-                          <li>
-                            Otvori{" "}
-                            <a
-                              href="https://elevenlabs.io/app/settings/api-keys"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary font-medium hover:underline inline-flex items-center gap-0.5"
-                            >
-                              ElevenLabs &gt; Developers &gt; API Keys
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          </li>
-                          <li>Klikni na dugme <strong>+ Create Key</strong> (ili otkrij postojeći ključ).</li>
-                          <li>Kopiraj tajni ključ koji počinje sa <strong>sk_...</strong> i nalepi ga ovde.</li>
-                        </ol>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Validation result feedback badge */}
-                  {keyValidationResult && (
-                    <div
-                      className={`rounded-lg p-2.5 text-xs flex items-center gap-2 border ${
-                        keyValidationResult.valid
-                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                          : "border-destructive/30 bg-destructive/10 text-destructive dark:text-red-300"
-                      }`}
-                    >
-                      {keyValidationResult.valid ? (
-                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                      ) : (
-                        <AlertCircle className="h-4 w-4 shrink-0" />
-                      )}
-                      <div className="flex-1 text-[11px] leading-snug">
-                        {keyValidationResult.valid ? (
-                          <span>
-                            <strong>Ključ je validan i aktivan!</strong> Paket: <strong>{keyValidationResult.tier || "Free"}</strong> • Preostalo za sintezu: <strong>{(keyValidationResult.remaining ?? 0).toLocaleString()}</strong> karaktera.
-                          </span>
-                        ) : (
-                          <span>{keyValidationResult.error || "Provera ključa nije uspela."}</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    Ključ unet ovde čuva se u tvom pregledaču. Alternativno, možeš ga uneti u postavkama projekta (Settings &gt; Secrets) kao <code className="font-mono text-primary bg-primary/10 px-1 py-0.5 rounded">ELEVENLABS_API_KEY</code>.
-                  </p>
-                </div>
-
-                {/* ElevenLabs Model Selector */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-semibold text-muted-foreground">
-                      ElevenLabs AI Model sinteze:
-                    </label>
-                    <span className="text-[10px] font-mono text-primary font-medium">
-                      {voiceSettings.elevenModelId || "eleven_v3"}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {[
-                      {
-                        id: "eleven_v3",
-                        name: "Eleven v3 (Ekspresivan & Emocije)",
-                        desc: "Podržava audio tagove poput [whispers], [giggles], [sarcastically] za živahan govor",
-                        badge: "Najnoviji v3",
-                      },
-                      {
-                        id: "eleven_multilingual_v2",
-                        name: "Eleven Multilingual v2",
-                        desc: "Stabilan i proveren višejezični model za tečnu i ujednačenu dikciju",
-                        badge: "Standard",
-                      },
-                    ].map((m) => {
-                      const isSelected = (voiceSettings.elevenModelId || "eleven_v3") === m.id;
-                      return (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onClick={() => updateVoiceSettings({ elevenModelId: m.id })}
-                          className={`cursor-pointer rounded-lg border p-2.5 text-left transition-all ${
-                            isSelected
-                              ? "border-primary bg-primary/10 text-foreground ring-1 ring-primary shadow-xs"
-                              : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-xs text-foreground">{m.name}</span>
-                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${isSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                              {m.badge}
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-muted-foreground mt-1">{m.desc}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* ElevenLabs Stability & Emotion Tuning */}
-                <div className="space-y-2 rounded-xl border border-border/80 bg-muted/20 p-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                      <Sliders className="h-3.5 w-3.5 text-primary" />
-                      Stabilnost glasa &amp; Emocije (Voice Stability):
-                    </label>
-                    <span className="text-[11px] font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">
-                      {Math.round((voiceSettings.elevenStability ?? 0.50) * 100)}%
-                    </span>
-                  </div>
-
-                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    U ElevenLabs modelima, stabilnost od <strong>45% - 50%</strong> predstavlja optimalan balans: glas ostaje savršeno stabilan i jasan (bez pucanja ili distorzije), dok istovremeno prenosi žive emocije i reaguje na audio tagove poput <code className="text-primary font-mono">[whispers]</code>, <code className="text-primary font-mono">[excitedly]</code> i <code className="text-primary font-mono">[gently]</code>.
-                  </p>
-
-                  {/* Quick Presets */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                    {[
-                      {
-                        label: "Stabilan sa emocijama",
-                        sub: "50% (Preporučeno)",
-                        desc: "Optimalan balans: stabilna dikcija uz punu emocionalnu ekspresiju",
-                        stability: 0.50,
-                        style: 0.15,
-                        badge: "Preporučeno",
-                      },
-                      {
-                        label: "Ekspresivan & Živ",
-                        sub: "35% (Visoke emocije)",
-                        desc: "Naglašena dramatičnost i varijacije intonacije",
-                        stability: 0.35,
-                        style: 0.30,
-                        badge: "Ekspresivno",
-                      },
-                      {
-                        label: "Edukativno Stabilan",
-                        sub: "75% (Miran ton)",
-                        desc: "Maksimalno ujednačen, staložen glas za definicije",
-                        stability: 0.75,
-                        style: 0.05,
-                        badge: "Ujednačeno",
-                      },
-                    ].map((p) => {
-                      const isSelected = Math.abs((voiceSettings.elevenStability ?? 0.50) - p.stability) < 0.05;
-                      return (
-                        <button
-                          key={p.label}
-                          type="button"
-                          onClick={() => updateVoiceSettings({ elevenStability: p.stability, elevenStyle: p.style })}
-                          className={`cursor-pointer rounded-lg border p-2 text-left transition-all ${
-                            isSelected
-                              ? "border-primary bg-primary/10 text-foreground ring-1 ring-primary shadow-xs"
-                              : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="font-bold text-[11px] text-foreground">{p.label}</span>
-                            <span className={`text-[8px] px-1 py-0.2 rounded font-semibold ${isSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
-                              {p.badge}
-                            </span>
-                          </div>
-                          <div className="text-[10px] font-mono text-primary font-medium">{p.sub}</div>
-                          <p className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{p.desc}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Range Slider */}
-                  <div className="pt-2 space-y-1">
-                    <div className="flex justify-between text-[10px] text-muted-foreground">
-                      <span>Više emocija / dinamika (15%)</span>
-                      <span className="font-medium text-foreground">Sredina (50%)</span>
-                      <span>Strogo monotono / fiksno (95%)</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.15"
-                      max="0.95"
-                      step="0.05"
-                      value={voiceSettings.elevenStability ?? 0.50}
-                      onChange={(e) => updateVoiceSettings({ elevenStability: parseFloat(e.target.value) })}
-                      className="w-full accent-primary h-1.5 bg-muted rounded-lg cursor-pointer"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-muted-foreground">
-                    Izaberi primarni ElevenLabs glas nastavnika:
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {ELEVENLABS_VOICES.map((v) => {
-                      const isSelected = voiceSettings.elevenVoiceId === v.id;
-                      return (
-                        <button
-                          key={v.id}
-                          type="button"
-                          onClick={() => updateVoiceSettings({ elevenVoiceId: v.id })}
-                          className={`cursor-pointer rounded-lg border p-2.5 text-left transition-all ${
-                            isSelected
-                              ? "border-primary bg-primary/10 text-foreground ring-1 ring-primary shadow-xs"
-                              : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-xs text-foreground flex items-center gap-1.5">
-                              {v.name}
-                              <span className="text-[10px] font-normal text-muted-foreground">({v.gender === "female" ? "Ženski" : "Muški"})</span>
-                            </span>
-                            {isSelected && <Check className="h-3.5 w-3.5 text-primary" />}
-                          </div>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{v.traits}</p>
-                          <span className="text-[9px] text-primary/90 font-medium block mt-1">{v.persona}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Test Voice Banner */}
-            <div className="rounded-xl border border-border/80 bg-card p-4 space-y-3 shadow-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                    <Languages className="h-3.5 w-3.5 text-primary" />
-                    Testiraj glas za trenutni jezik: <span className="uppercase text-primary font-mono font-bold bg-primary/10 px-1.5 py-0.5 rounded">{lang}</span>
-                  </h4>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Poslušaj standardnu dikciju ili isprobaj emotivno čitanje sa audio tagovima.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={isTestingVoice ? "destructive" : "outline"}
-                    onClick={() => handleTestVoice(false)}
-                    className="gap-1.5 font-semibold text-xs"
-                  >
-                    {isTestingVoice ? (
-                      <>
-                        <Square className="h-3.5 w-3.5 fill-current" />
-                        Zaustavi
-                      </>
-                    ) : (
-                      <>
-                        <Play className="h-3.5 w-3.5 fill-current" />
-                        Standardno
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={isTestingVoice ? "destructive" : "default"}
-                    onClick={() => handleTestVoice(true)}
-                    className="gap-1.5 font-semibold text-xs shadow-xs"
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Sa emocijama
-                  </Button>
-                </div>
-              </div>
-
-              {isTestingVoice && (
-                <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-xs text-primary font-medium animate-pulse">
-                  <Volume2 className="h-4 w-4 shrink-0" />
-                  <span>Govor se reprodukuje... Poslušaj razgovetnost, akcenat i tempo.</span>
-                </div>
-              )}
-            </div>
-
-            {/* Speech Rate (Speed) Selection */}
-            <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Brzina govora (Speed)
-              </label>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {[
-                  { value: 0.85, label: "0.85x", desc: "Sporije & Vrlo razgovetno" },
-                  { value: 0.95, label: "0.95x", desc: "Preporučeno (Jasno)" },
-                  { value: 1.05, label: "1.05x", desc: "Normalan tempo" },
-                  { value: 1.2, label: "1.20x", desc: "Brže slušanje" },
-                ].map((rateOption) => {
-                  const isSelected = Math.abs(voiceSettings.rate - rateOption.value) < 0.05;
-                  return (
-                    <button
-                      key={rateOption.value}
-                      type="button"
-                      onClick={() => updateVoiceSettings({ rate: rateOption.value })}
-                      className={`cursor-pointer rounded-xl border p-2.5 text-left transition-all ${
-                        isSelected
-                          ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary shadow-xs"
-                          : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-foreground">{rateOption.label}</span>
-                        {isSelected && <Check className="h-3 w-3 text-primary" />}
-                      </div>
-                      <span className="text-[10px] leading-tight block mt-0.5">{rateOption.desc}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Pitch / Tone Selection */}
-            <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Visina tona glasa (Pitch)
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { value: 0.95, label: "0.95x", desc: "Topliji / Dublji ton" },
-                  { value: 1.0, label: "1.0x", desc: "Prirodan ljudski glas" },
-                  { value: 1.05, label: "1.05x", desc: "Svetliji ton" },
-                ].map((pitchOption) => {
-                  const isSelected = Math.abs(voiceSettings.pitch - pitchOption.value) < 0.03;
-                  return (
-                    <button
-                      key={pitchOption.value}
-                      type="button"
-                      onClick={() => updateVoiceSettings({ pitch: pitchOption.value })}
-                      className={`cursor-pointer rounded-xl border p-2.5 text-left transition-all ${
-                        isSelected
-                          ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary shadow-xs"
-                          : "border-border/70 bg-card text-muted-foreground hover:border-border hover:text-foreground"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-foreground">{pitchOption.label}</span>
-                        {isSelected && <Check className="h-3 w-3 text-primary" />}
-                      </div>
-                      <span className="text-[10px] leading-tight block mt-0.5">{pitchOption.desc}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Available Voices on device */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Izbor sistemskog glasa uređaja (Fallback / Offline)
-                </label>
-                <span className="text-[10px] text-muted-foreground">
-                  {availableVoices.length > 0 ? `${availableVoices.length} instaliranih glasova` : "Učitavanje..."}
-                </span>
-              </div>
-              <div className="rounded-xl border border-border/80 bg-card p-3 space-y-2">
-                <select
-                  value={voiceSettings.preferredVoiceURI}
-                  onChange={(e) => updateVoiceSettings({ preferredVoiceURI: e.target.value })}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  <option value="">Automatski (Najčistiji glas za izabrani jezik - Preporučeno)</option>
-                  {availableVoices.map((v) => (
-                    <option key={v.voiceURI} value={v.voiceURI}>
-                      {v.name} ({v.lang}) {v.localService ? "• Uređaj" : "• Online"}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Ako ostaviš na <strong>Automatski</strong>, sistem automatski bira najkvalitetniji glas instaliran na sistemu (Edge Natural, Google Neural, ili Apple Siri).
-                </p>
-              </div>
-            </div>
-
-            {/* Clarity guarantee note */}
-            <div className="rounded-xl border border-border/70 bg-muted/30 p-3.5 text-xs text-muted-foreground space-y-1.5">
-              <p className="font-semibold text-foreground flex items-center gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                Pametno čišćenje teksta za maksimalnu razumljivost:
-              </p>
-              <ul className="list-disc pl-4 space-y-1 text-[11px]">
-                <li>Matematički znakovi (+, -, *, =, %) se automatski pretvaraju u izgovorene reči na izabranom jeziku.</li>
-                <li>Uklonjeni su emodžiji, markdown zvezdice i tarabe koji inače zbunjuju govor.</li>
-                <li>Tekst se deli na prirodne rečenice kako bi disanje i intonacija zvučali prirodno.</li>
-              </ul>
+            <div className="rounded-xl border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
+              <p className="font-semibold text-foreground mb-1">Govor je isključen</p>
+              <p>Sintetizovanje glasa (TTS) je uklonjeno iz aplikacije. Sadržaj se prikazuje kao tekst.</p>
             </div>
           </div>
         )}
 
-        <DialogFooter className="flex items-center justify-between sm:justify-between pt-2">
+        <DialogFooter className="flex flex-wrap items-center justify-between gap-2 sm:justify-between pt-2">
           <div className="text-[11px] text-muted-foreground">
             Current engine: <span className="font-semibold text-foreground capitalize">{provider.replace("_", " ")}</span>
           </div>
@@ -1318,10 +525,11 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
               variant="ghost"
               size="sm"
               onClick={() => onOpenChange(false)}
+              className="min-h-[40px] px-4 sm:min-h-0 sm:px-3"
             >
               Cancel
             </Button>
-            <Button type="button" size="sm" onClick={handleSaveAll}>
+            <Button type="button" size="sm" onClick={handleSaveAll} className="min-h-[40px] px-4 sm:min-h-0 sm:px-3">
               Save & Apply
             </Button>
           </div>
