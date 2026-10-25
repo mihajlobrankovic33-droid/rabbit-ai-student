@@ -118,8 +118,26 @@ async function readError(res: Response): Promise<string> {
   return `Greška servera (${res.status})`;
 }
 
+/**
+ * In-flight de-dup: React (StrictMode / rapid re-renders) can call this
+ * concurrently for the same user. Without sharing one promise, both callers
+ * read "no profile yet", both insert, and the loser gets HTTP 409 in a loop.
+ */
+const registerInFlight = new Map<string, Promise<{ code: string; name: string }>>();
+
 /** Registers me (creates the code on first use) and returns my code. */
 export async function registerCode(
+  userId: string,
+  name: string
+): Promise<{ code: string; name: string }> {
+  const pending = registerInFlight.get(userId);
+  if (pending) return pending;
+  const run = doRegisterCode(userId, name).finally(() => registerInFlight.delete(userId));
+  registerInFlight.set(userId, run);
+  return run;
+}
+
+async function doRegisterCode(
   userId: string,
   name: string
 ): Promise<{ code: string; name: string }> {
@@ -143,6 +161,15 @@ export async function registerCode(
     .maybeSingle();
   if (readErr) throw new Error(supabaseErrorMessage(readErr));
 
+  // Keep the profile's email in sync so friends can see who they talk to.
+  let email: string | null = null;
+  try {
+    const { data: sess } = await sb.auth.getSession();
+    email = sess?.session?.user?.email ?? null;
+  } catch {
+    // email is optional — ignore
+  }
+
   if (existing?.code) {
     if (name && existing.display_name !== name) {
       await sb.from("profiles").update({ display_name: name }).eq("id", userId);
@@ -153,14 +180,47 @@ export async function registerCode(
   // No profile yet — create one with a fresh unique code.
   for (let attempt = 0; attempt < 8; attempt++) {
     const code = randomCode();
-    const { error } = await sb
-      .from("profiles")
-      .insert({ id: userId, code, display_name: name || "Učenik" });
+    const { error } = await sb.from("profiles").insert({
+      id: userId,
+      code,
+      display_name: name || "Učenik",
+      ...(email ? { email } : {}),
+    });
     if (!error) return { code, name: name || "Učenik" };
+
     const msg = supabaseErrorMessage(error);
-    // 23505 = unique_violation (code already taken) → try another one
-    if (msg.includes("duplicate") || msg.includes("unique")) continue;
-    throw new Error(msg);
+    const isConflict =
+      (error as { code?: string }).code === "23505" ||
+      /duplicate|unique/i.test(msg);
+    if (!isConflict) throw new Error(msg);
+
+    // Conflict = either my row already exists (concurrent call won the race)
+    // or this code is taken. Re-read before retrying — never re-insert the
+    // same id, that would just loop on HTTP 409.
+    const { data: again } = await sb
+      .from("profiles")
+      .select("id, code, display_name")
+      .eq("id", userId)
+      .maybeSingle();
+    if (again?.code) {
+      return { code: again.code, name: name || again.display_name || "" };
+    }
+    if (again) {
+      // Row exists but has no code yet → assign one via update instead.
+      const fresh = randomCode();
+      const { error: updErr } = await sb
+        .from("profiles")
+        .update({
+          code: fresh,
+          display_name: name || again.display_name || "Učenik",
+          ...(email ? { email } : {}),
+        })
+        .eq("id", userId)
+        .is("code", null);
+      if (!updErr) return { code: fresh, name: name || "Učenik" };
+      continue;
+    }
+    // Row still missing → the code itself collided, try another one.
   }
   throw new Error("Ne mogu da generišem slobodan kod. Pokušaj ponovo.");
 }
