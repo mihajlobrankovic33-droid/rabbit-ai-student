@@ -180,7 +180,7 @@ export default function Dashboard() {
                 }`}
               >
                 <MessageSquare className="h-3.5 w-3.5" />
-                <span>Chat</span>
+                <span>{t("chatTab")}</span>
               </button>
 
               <button
@@ -193,7 +193,7 @@ export default function Dashboard() {
                 }`}
               >
                 <NotebookPen className="h-3.5 w-3.5" />
-                <span>Puškice</span>
+                <span>{t("puskiceTab")}</span>
               </button>
 
               <button
@@ -232,7 +232,7 @@ export default function Dashboard() {
               title="Meni (Istorija, Fokus tajmer, Offline, Teme, Jezik, Odjava)"
             >
               <Menu className="h-4 w-4 text-primary" />
-              <span className="hidden sm:inline">Meni</span>
+              <span className="hidden sm:inline">{t("menu")}</span>
               {sessions.length > 0 && (
                 <span className="rounded-full bg-primary/20 px-1.5 py-0.2 text-[10px] font-bold text-primary">
                   {sessions.length}
@@ -279,7 +279,7 @@ export default function Dashboard() {
             }`}
           >
             <MessageSquare className={`h-5 w-5 ${activeView === "chat" ? "scale-110" : ""}`} />
-            <span className="text-[10px] mt-1">Chat</span>
+            <span className="text-[10px] mt-1">{t("chatTab")}</span>
           </button>
 
           <button
@@ -294,7 +294,7 @@ export default function Dashboard() {
             <NotebookPen
               className={`h-5 w-5 ${activeView === "puskice" ? "scale-110" : ""}`}
             />
-            <span className="text-[10px] mt-1">Puškice</span>
+            <span className="text-[10px] mt-1">{t("puskiceTab")}</span>
           </button>
 
           <button
@@ -325,7 +325,7 @@ export default function Dashboard() {
                 </span>
               )}
             </div>
-            <span className="text-[10px] mt-1 font-medium">Meni</span>
+            <span className="text-[10px] mt-1">{t("menu")}</span>
           </button>
         </div>
       </nav>
